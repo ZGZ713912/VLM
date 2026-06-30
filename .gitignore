@@ -1,0 +1,67 @@
+# ── Python bytecode & build ──────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+
+# ── Virtual environments ────────────────────────────────────
+.venv/
+venv/
+env/
+*.conda
+
+# ── Environment & secrets ───────────────────────────────────
+.env
+*.secret
+*.key
+
+# ── Jupyter ─────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Dataset (large binary files — download separately) ──────
+data/Avenue_Dataset/
+
+# ── Runtime outputs (keep dirs via .gitkeep) ────────────────
+checkpoints/*
+!checkpoints/.gitkeep
+logs/*
+!logs/.gitkeep
+results/*
+!results/.gitkeep
+configs/*
+!configs/.gitkeep
+
+# ── Model weights ───────────────────────────────────────────
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+
+# ── Caches ──────────────────────────────────────────────────
+.cache/
+*.log
+wandb/
+
+# ── TensorBoard ─────────────────────────────────────────────
+runs/
+
+# ── OS files ────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+
+# ── Editors / IDEs ──────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+*~
+.vscode/

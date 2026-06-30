@@ -1,0 +1,36 @@
+services:
+  vlm-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: "${BASE_IMAGE:-pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime}"
+    image: vlm-ws:dev
+    container_name: vlm-ws-dev
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    working_dir: /workspace/vlm_ws
+    stdin_open: true
+    tty: true
+    ipc: host
+    shm_size: "${SHM_SIZE:-16gb}"
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      HOME: /tmp/devhome
+      SHELL: /usr/bin/zsh
+      WORKSPACE_DIR: /workspace/vlm_ws
+      PYTHONPATH: /workspace/vlm_ws
+      MPLCONFIGDIR: /tmp/devhome/.config/matplotlib
+      PIP_CACHE_DIR: /tmp/devhome/.cache/pip
+      HF_HOME: /tmp/devhome/.cache/huggingface
+      TRANSFORMERS_CACHE: /tmp/devhome/.cache/huggingface/transformers
+      TORCH_HOME: /tmp/devhome/.cache/torch
+    volumes:
+      - .:/workspace/vlm_ws
+      - dev-home:/tmp/devhome
+    ports:
+      - "${JUPYTER_PORT:-8888}:8888"
+      - "${TENSORBOARD_PORT:-6006}:6006"
+    command: sleep infinity
+
+volumes:
+  dev-home:
