@@ -4,8 +4,6 @@
 # 让类型注解在运行时以字符串形式延迟解析，减少前向引用问题。
 from __future__ import annotations
 
-# Mapping 表示“像字典一样”的只读映射接口。
-from collections.abc import Mapping
 # dataclass 可以快速定义只存数据的类。
 from dataclasses import dataclass
 # lru_cache 用来缓存函数结果，避免重复读取同一个 mask 文件。
@@ -29,9 +27,6 @@ from decord import VideoReader
 from scipy.io import loadmat, whosmat
 # Dataset 是 PyTorch 数据集基类。
 from torch.utils.data import Dataset
-
-# PromptType 从 prompts 模块统一导入，避免多处定义。
-from prompts import DEFAULT_PROMPT_TEMPLATES, PromptType
 
 # VideoBackend 限制视频读取后端只能是下面三种之一。
 VideoBackend = Literal["auto", "decord", "opencv"]
@@ -220,9 +215,6 @@ class AvenueDataset(Dataset[dict[str, Any]]):
         clip_stride: int = 1,  # clip 内相邻采样帧之间的间隔。
         clip_step: int | None = None,  # 相邻两个 clip 的起始位置间隔，默认等于 clip_length。
         image_size: tuple[int, int] | None = (224, 224),  # 是否把视频帧缩放到固定大小，格式为 (H, W)。
-        prompt_type: PromptType = "scene",  # 当前样本默认使用哪一种 prompt 类型。
-        prompt_text: str | None = None,  # 如果外部直接传 prompt 文本，就优先使用它。
-        prompt_templates: Mapping[str, str] | None = None,  # 外部可额外传入或覆盖 prompt 模板。
         video_backend: VideoBackend = "auto",  # 选择视频读取后端，auto 会优先尝试 decord。
         resize_mask_to_video: bool = False,  # 是否把像素级 mask 也缩放到和视频帧一样大。
         include_last_clip: bool = True,  # 是否保证最后一个 clip 覆盖到视频末尾。
@@ -247,17 +239,6 @@ class AvenueDataset(Dataset[dict[str, Any]]):
         self.clip_stride = clip_stride  # 保存 clip 内采样步长。
         self.clip_step = clip_step if clip_step is not None else clip_length  # 如果没传 clip_step，就默认按不重叠 clip 的方式移动。
         self.image_size = image_size  # 保存输出图像大小配置。
-        self.prompt_type = prompt_type  # 保存当前 prompt 类型。
-        self.prompt_templates = dict(DEFAULT_PROMPT_TEMPLATES)  # 先复制一份默认 prompt 模板，避免修改全局变量。
-        if prompt_templates is not None:  # 如果外部传了额外模板。
-            self.prompt_templates.update(prompt_templates)  # 就覆盖/补充默认模板。
-        if prompt_type not in self.prompt_templates and prompt_text is None:  # 如果所选 prompt_type 没有对应模板，且也没有直接给文本。
-            raise KeyError(
-                f"Prompt type {prompt_type!r} is missing from prompt_templates"
-            )
-        self.prompt_text = (  # 决定最终真正使用的 prompt 文本。
-            prompt_text if prompt_text is not None else self.prompt_templates[prompt_type]
-        )
         self.video_backend = video_backend  # 保存视频读取后端配置。
         self.resize_mask_to_video = resize_mask_to_video  # 保存是否缩放 mask 的配置。
         self.include_last_clip = include_last_clip  # 保存是否补最后一个 clip 的配置。
@@ -393,8 +374,6 @@ class AvenueDataset(Dataset[dict[str, Any]]):
             "frame_label": frame_label,  # 帧级标签，形状是 (T,)。
             "pixel_mask": clip_masks,  # 像素级 mask，形状通常是 (T, H, W)。
             "clip_label": clip_label,  # clip 级标签，标量张量。
-            "prompt_type": self.prompt_type,  # 当前样本使用的 prompt 类型。
-            "prompt_text": self.prompt_text,  # 当前样本最终对应的 prompt 文本。
             "video_id": video_record.video_id,  # 当前样本来自哪个视频。
             "start_frame": clip_record.start_frame,  # 当前 clip 在原视频中的起始帧位置。
         }

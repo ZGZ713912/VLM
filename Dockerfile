@@ -16,11 +16,6 @@ ENV TZ=Asia/Shanghai \
   PIP_NO_CACHE_DIR=1 \
   PYTHONPATH=/workspace/vlm_ws
 
-
-
-ENV http_proxy=http://172.17.0.1:7890
-ENV https_proxy=http://172.17.0.1:7890
-ENV no_proxy=localhost,127.0.0.1
 # 替换 apt 源为阿里云（适用于 Ubuntu 22.04 Jammy）
 RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
   sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list

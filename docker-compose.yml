@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
       args:
         BASE_IMAGE: "${BASE_IMAGE:-pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime}"
+        INSTALL_OPTIONAL_SHELL_TOOLS: "1"
     image: vlm-ws:dev
     container_name: vlm-ws-dev
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
@@ -24,9 +25,17 @@ services:
       HF_HOME: /tmp/devhome/.cache/huggingface
       TRANSFORMERS_CACHE: /tmp/devhome/.cache/huggingface/transformers
       TORCH_HOME: /tmp/devhome/.cache/torch
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      NO_PROXY: ""
+      
     volumes:
       - .:/workspace/vlm_ws
       - dev-home:/tmp/devhome
+
     ports:
       - "${JUPYTER_PORT:-8888}:8888"
       - "${TENSORBOARD_PORT:-6006}:6006"

@@ -32,6 +32,45 @@ docker compose up -d
 docker compose exec vlm-dev zsh
 ```
 
+## 训练 / 评估（一条命令闭环）
+
+```bash
+# 训练 + 视频级评估（自动保存 checkpoint / 指标 / 解释 / 可视化图）
+python train.py --config configs/experiment.yaml
+
+# 只评估已训练好的 checkpoint
+python eval.py --config configs/experiment.yaml --ckpt ./checkpoints/exp01/best.pt
+
+# 续训
+python train.py --config configs/experiment.yaml --resume ./checkpoints/exp01/last.pt
+```
+
+**快速迭代路径**（backbone 冻结时推荐，训练提速 ~10×）：
+
+```bash
+# 1. 离线提取所有视频帧的 CLIP 特征（一次性）
+python tools/extract_video_features.py --root ./data --split training --out ./data/features/training
+python tools/extract_video_features.py --root ./data --split testing  --out ./data/features/testing
+
+# 2. 提取运动伪标签（frame_label_mode=motion_diff 时需要）
+python tools/extract_motion_labels.py --root ./data --split testing --out ./data/labels
+
+# 3. 在 config 里设置 use_feature: true 即可自动走 FeatureDataset
+```
+
+> 实验对比（prompt ablation / fusion 对比 / backbone 互换）**全部改 yaml 即可**，无需改代码：
+> 见 `configs/prompts.yaml`（prompt 词汇表）与 `configs/experiment.yaml`（`model.fusion.type` / `model.backbone.name`）。
+
+### ⚠️ 关于 Avenue 数据集标注（重要）
+
+本仓库 `data/Avenue_Dataset/*_vol/*.mat` 中的 `vol` 变量经检测**实际是降采样的灰度视频帧，
+而不是二值异常 mask**（与视频帧相关系数 ≈ 0.999）。因此：
+
+- 若你持有**官方二值 mask**：保持 `frame_label_mode: pixel`（默认），即可直接训练/评估。
+- 若使用本仓库自带数据：请把配置改为 `frame_label_mode: motion_diff`（基于帧间差的运动伪标签，
+  VAD 经典 baseline 之一，仅用于跑通流程，**学术结论请使用真实 mask**）。
+- 代码会自动检测可疑 mask 并在日志里提醒（`datasets/video_dataset.py: mask_looks_like_frames`）。
+
 ### GPU 主机
 
 ```bash
@@ -74,18 +113,46 @@ vlm_ws/
 ├── models/                  # 模型模块
 │   ├── DESIGN.md            # 模型架构设计文档
 │   ├── __init__.py          # VLMModel（backbone + fusion + head）
+│   ├── factory.py           # 配置驱动模型工厂（backbone swap / fusion 对比）
 │   ├── backbone.py          # CLIP 视觉 + 文本编码器
-│   └── fusion.py            # ConcatFusion / CrossAttnFusion
-│   └── head.py              # 异常检测头
-├── data/                    # 数据模块
+│   ├── alignment.py         # 视觉-语言语义对齐投影
+│   ├── matcher.py           # 相似度匹配（对比学习 / per-prompt 异常）
+│   ├── fusion.py            # ConcatFusion / GatedFusion / CrossAttnFusion
+│   ├── temporal.py          # TemporalIdentity / TemporalTransformer
+│   ├── head.py              # 异常检测头（frame_logits + frame_score）
+│   └── outputs.py           # 各模块统一的 frozen dataclass 输出
+├── data/                    # 旧数据模块（向后兼容 re-export）
 │   ├── avenue_dataset.py    # Avenue 数据集类
 │   └── dataloader.py        # DataLoader 工厂函数
+├── datasets/                # 新数据模块（推荐）
+│   ├── video_dataset.py     # 原始像素 Dataset（支持 pixel / motion_diff 标签）
+│   ├── feature_dataset.py   # 预提取特征 Dataset（训练提速 ~10×）
+│   ├── dataloader.py        # DataLoader 工厂函数
+│   └── builders.py          # 配置驱动：自动选 Video/Feature 路径
 ├── prompts/                 # Prompt 模板管理
-│   └── __init__.py          # label / scene / contrast 三种模板
-├── train/                   # 训练循环
-├── eval/                    # 评估指标
-├── utils/                   # 日志、可视化、可复现工具
+│   ├── __init__.py          # PromptManager：label / scene / contrast 三种模板
+│   └── processor.py         # PromptProcessor：展开 / ensemble / hard negatives / 缓存
+├── train/                   # 训练模块
+│   ├── losses.py            # VLMVADLoss = 帧级 BCE + 对比对齐（含数学注释）
+│   └── trainer.py           # Trainer：optimizer / scheduler / AMP / checkpoint
+├── eval/                    # 评估模块
+│   ├── metrics.py           # frame / clip / video 级 AUC & AP
+│   └── inference.py         # 视频级滑窗推理 + template-based 可解释性
+├── utils/                   # 工具模块
+│   ├── reproducibility.py   # set_seed（固定所有随机源）
+│   ├── logging.py           # get_logger / MetricLogger / TBLogger
+│   ├── io.py                # checkpoint / JSON 读写
+│   ├── config.py            # 配置加载（experiment + prompts 合并）
+│   └── visualization.py     # 时序热力图 / prompt 相似度 / attention
+├── tools/                   # 离线特征与标签提取脚本
+│   ├── extract_video_features.py
+│   ├── extract_text_features.py
+│   └── extract_motion_labels.py
+├── train.py                 # 训练入口（配置驱动，一条命令闭环）
+├── eval.py                  # 评估入口（加载 checkpoint 出指标+解释+图）
 ├── configs/                 # 实验配置文件
+│   ├── experiment.yaml      # 训练/模型/数据/路径
+│   └── prompts.yaml         # prompt 词汇表与极性关键词
 ├── checkpoints/             # 模型权重（运行时生成）
 ├── logs/                    # TensorBoard 日志（运行时生成）
 ├── results/                 # 实验结果（运行时生成）
@@ -124,7 +191,7 @@ tensorboard --logdir logs --host 0.0.0.0 --port 6006
 
 在 `.env` 文件中修改即可。
 
-## 技术栈
+## 提醒
 
 - **框架：** PyTorch 2.3, OpenCLIP, HuggingFace Transformers
 - **视频处理：** OpenCV, Decord

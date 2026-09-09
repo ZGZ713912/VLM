@@ -6,8 +6,6 @@ from __future__ import annotations
 
 # random 是 Python 标准库中的随机数模块。
 import random
-# Mapping 表示类似字典的映射类型。
-from collections.abc import Mapping
 # Path 用于处理文件路径。
 from pathlib import Path
 # Any 表示任意类型，这里主要给 **dataset_kwargs 使用。
@@ -21,7 +19,7 @@ import torch
 from torch.utils.data import DataLoader
 
 # 从同目录的 avenue_dataset 模块导入数据集类和相关类型别名。
-from .avenue_dataset import AvenueDataset, PromptType, VideoBackend
+from .avenue_dataset import AvenueDataset, VideoBackend
 
 
 # 这个函数会在每个 dataloader worker 进程启动时运行一次。
@@ -42,9 +40,6 @@ def build_avenue_dataset(
     clip_stride: int = 1,  # clip 内部采样帧之间的步长。
     clip_step: int | None = None,  # 相邻 clip 起始位置的步长。
     image_size: tuple[int, int] | None = (224, 224),  # 是否把视频帧缩放到固定大小。
-    prompt_type: PromptType = "scene",  # 选择哪种 prompt 类型。
-    prompt_text: str | None = None,  # 可选的自定义 prompt 文本。
-    prompt_templates: Mapping[str, str] | None = None,  # 可选的 prompt 模板覆盖项。
     video_backend: VideoBackend = "auto",  # 视频读取后端。
     resize_mask_to_video: bool = False,  # 是否把 mask 缩放到视频帧大小。
     include_last_clip: bool = True,  # 是否补上最后一个贴近视频结尾的 clip。
@@ -59,9 +54,6 @@ def build_avenue_dataset(
         clip_stride=clip_stride,  # clip 内部帧间隔。
         clip_step=clip_step,  # 相邻 clip 的移动步长。
         image_size=image_size,  # 输出图像大小。
-        prompt_type=prompt_type,  # prompt 类型。
-        prompt_text=prompt_text,  # 自定义 prompt 文本。
-        prompt_templates=prompt_templates,  # 自定义 prompt 模板字典。
         video_backend=video_backend,  # 视频读取后端。
         resize_mask_to_video=resize_mask_to_video,  # 是否同步缩放 mask。
         include_last_clip=include_last_clip,  # 是否补最后一个 clip。
