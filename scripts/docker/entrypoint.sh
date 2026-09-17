@@ -4,6 +4,8 @@ set -euo pipefail
 HOME_DIR="${HOME:-/tmp/devhome}"
 WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace/vlm_ws}"
 SHARE_DIR="${VLM_WS_SHARE_DIR:-/usr/local/share/vlm_ws}"
+OPENCODE_AUTH_STAGE="${OPENCODE_AUTH_STAGE:-/opt/opencode-host/auth.json}"
+OPENCODE_AUTH_DIR="${HOME_DIR}/.local/share/opencode"
 ZSHRC_TEMPLATE="${SHARE_DIR}/zshrc.template"
 ENV_SETUP_TEMPLATE="${SHARE_DIR}/env_setup.zsh"
 ZSHRC_PATH="${HOME_DIR}/.zshrc"
@@ -26,6 +28,14 @@ mkdir -p \
   "${HOME_DIR}/.npm-global/bin" \
   "${HOME_DIR}/.codex/tmp/arg0" \
   "${HOME_DIR}/.local/share/opencode"
+
+if [ -f "${OPENCODE_AUTH_STAGE}" ]; then
+  if [ -w "${OPENCODE_AUTH_DIR}" ]; then
+    install -m 0600 "${OPENCODE_AUTH_STAGE}" "${OPENCODE_AUTH_DIR}/auth.json"
+  else
+    echo "warning: ${OPENCODE_AUTH_DIR} is not writable; run 'docker compose down -v' to recreate the dev-home volume." >&2
+  fi
+fi
 
 if [ ! -e "${HOME_DIR}/.oh-my-zsh" ]; then
   if [ -d /opt/oh-my-zsh ]; then

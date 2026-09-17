@@ -38,9 +38,11 @@ services:
       # Reuse the host opencode configuration (providers, models, agents, skills,
       # AGENTS.md) without rebuilding the image.
       - ${HOST_OPENCODE_CONFIG:-${HOME}/.config/opencode}:/tmp/devhome/.config/opencode
-      # Reuse host credentials so `opencode` is already logged in. Sessions stay
-      # in the container-local database to avoid clobbering the host SQLite file.
-      - ${HOST_OPENCODE_AUTH:-${HOME}/.local/share/opencode/auth.json}:/tmp/devhome/.local/share/opencode/auth.json
+      # Reuse host credentials so `opencode` is already logged in. The host file
+      # is staged read-only outside $HOME; the entrypoint copies it into the
+      # container-local data dir (a bind-mounted file would leave a root-owned
+      # parent directory behind, which the unprivileged user cannot write to).
+      - ${HOST_OPENCODE_AUTH:-${HOME}/.local/share/opencode/auth.json}:/opt/opencode-host/auth.json:ro
       # Global agent skills (optional; remove if unused on the host).
       - ${HOST_AGENTS_DIR:-${HOME}/.agents}:/tmp/devhome/.agents
 

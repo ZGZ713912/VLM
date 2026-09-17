@@ -19,7 +19,7 @@ The image also ships the `opencode` CLI (installed when `INSTALL_OPTIONAL_SHELL_
 configuration is bind-mounted into the container so `opencode` reuses it directly:
 
 - `$HOST_OPENCODE_CONFIG` (`~/.config/opencode`) -> `/tmp/devhome/.config/opencode`
-- `$HOST_OPENCODE_AUTH` (`~/.local/share/opencode/auth.json`) -> `/tmp/devhome/.local/share/opencode/auth.json`
+- `$HOST_OPENCODE_AUTH` (`~/.local/share/opencode/auth.json`) -> `/opt/opencode-host/auth.json` (read-only; the entrypoint copies it to `/tmp/devhome/.local/share/opencode/auth.json`)
 - `$HOST_AGENTS_DIR` (`~/.agents`) -> `/tmp/devhome/.agents`
 
 Sessions and the SQLite database stay inside the `dev-home` volume, so the host database is never

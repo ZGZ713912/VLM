@@ -198,8 +198,9 @@ tensorboard --logdir logs --host 0.0.0.0 --port 6006
 
 镜像会随 `INSTALL_OPTIONAL_SHELL_TOOLS=1` 自动安装 `opencode-ai`，并把宿主机的
 `~/.config/opencode`、`~/.local/share/opencode/auth.json` 和 `~/.agents` 绑定挂载进
-容器 HOME（`/tmp/devhome`）。因此容器内直接执行 `opencode` 即可复用宿主机的模型
-/provider 配置与登录态；会话数据库保存在容器卷内，不会与宿主机的 SQLite 冲突。
+容器（`auth.json` 先只读挂载到 `/opt/opencode-host/`，由入口脚本复制到容器 HOME）。
+因此容器内直接执行 `opencode` 即可复用宿主机的模型 /provider 配置与登录态；会话
+数据库保存在容器卷内（`/tmp/devhome`），不会与宿主机的 SQLite 冲突。
 
 ## 提醒
 
