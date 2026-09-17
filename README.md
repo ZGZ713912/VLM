@@ -188,8 +188,18 @@ tensorboard --logdir logs --host 0.0.0.0 --port 6006
 | `SHM_SIZE` | `16gb` | 共享内存大小 |
 | `JUPYTER_PORT` | `8888` | Jupyter 端口映射 |
 | `TENSORBOARD_PORT` | `6006` | TensorBoard 端口映射 |
+| `HOST_OPENCODE_CONFIG` | `$HOME/.config/opencode` | 宿主机 opencode 配置挂载路径 |
+| `HOST_OPENCODE_AUTH` | `$HOME/.local/share/opencode/auth.json` | 宿主机 opencode 认证文件挂载路径 |
+| `HOST_AGENTS_DIR` | `$HOME/.agents` | 宿主机全局 Agent skills 挂载路径 |
 
 在 `.env` 文件中修改即可。
+
+## 容器内 opencode
+
+镜像会随 `INSTALL_OPTIONAL_SHELL_TOOLS=1` 自动安装 `opencode-ai`，并把宿主机的
+`~/.config/opencode`、`~/.local/share/opencode/auth.json` 和 `~/.agents` 绑定挂载进
+容器 HOME（`/tmp/devhome`）。因此容器内直接执行 `opencode` 即可复用宿主机的模型
+/provider 配置与登录态；会话数据库保存在容器卷内，不会与宿主机的 SQLite 冲突。
 
 ## 提醒
 

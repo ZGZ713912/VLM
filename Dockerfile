@@ -3,6 +3,7 @@ FROM ${BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_VERSION=22.15.1
+ARG OPENCODE_VERSION=latest
 ARG INSTALL_OPTIONAL_SHELL_TOOLS=0
 
 ENV TZ=Asia/Shanghai \
@@ -46,11 +47,12 @@ RUN if [ "${INSTALL_OPTIONAL_SHELL_TOOLS}" = "1" ]; then \
   curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" -o /tmp/node.tar.xz && \
   tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner && \
   rm /tmp/node.tar.xz && \
-  npm install -g @openai/codex && \
+  npm install -g @openai/codex "opencode-ai@${OPENCODE_VERSION}" && \
   git clone --depth=1 https://gitee.com/mirrors/oh-my-zsh.git /opt/oh-my-zsh && \
-  codex --version; \
+  codex --version && \
+  opencode --version; \
   else \
-  echo "Skipping optional shell tooling install (Node.js, Codex CLI, oh-my-zsh)."; \
+  echo "Skipping optional shell tooling install (Node.js, Codex CLI, opencode, oh-my-zsh)."; \
   fi
 
 WORKDIR /workspace/vlm_ws

@@ -35,6 +35,14 @@ services:
     volumes:
       - .:/workspace/vlm_ws
       - dev-home:/tmp/devhome
+      # Reuse the host opencode configuration (providers, models, agents, skills,
+      # AGENTS.md) without rebuilding the image.
+      - ${HOST_OPENCODE_CONFIG:-${HOME}/.config/opencode}:/tmp/devhome/.config/opencode
+      # Reuse host credentials so `opencode` is already logged in. Sessions stay
+      # in the container-local database to avoid clobbering the host SQLite file.
+      - ${HOST_OPENCODE_AUTH:-${HOME}/.local/share/opencode/auth.json}:/tmp/devhome/.local/share/opencode/auth.json
+      # Global agent skills (optional; remove if unused on the host).
+      - ${HOST_AGENTS_DIR:-${HOME}/.agents}:/tmp/devhome/.agents
 
     ports:
       - "${JUPYTER_PORT:-8888}:8888"

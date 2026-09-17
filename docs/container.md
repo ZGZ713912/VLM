@@ -15,6 +15,18 @@ This project uses Docker Compose for a reproducible research environment.
 
 The project source code is bind-mounted at `/workspace/vlm_ws`, but the container home directory and caches are stored in the Docker named volume `dev-home`. They are isolated from the host filesystem and persist across container restarts.
 
+The image also ships the `opencode` CLI (installed when `INSTALL_OPTIONAL_SHELL_TOOLS=1`). The host
+configuration is bind-mounted into the container so `opencode` reuses it directly:
+
+- `$HOST_OPENCODE_CONFIG` (`~/.config/opencode`) -> `/tmp/devhome/.config/opencode`
+- `$HOST_OPENCODE_AUTH` (`~/.local/share/opencode/auth.json`) -> `/tmp/devhome/.local/share/opencode/auth.json`
+- `$HOST_AGENTS_DIR` (`~/.agents`) -> `/tmp/devhome/.agents`
+
+Sessions and the SQLite database stay inside the `dev-home` volume, so the host database is never
+written to by the container. Override the three variables in `.env` when the host paths differ, or
+set them to a directory that exists locally (a missing `auth.json` becomes an empty directory and is
+ignored by the CLI).
+
 ## Quick Start
 
 1. Copy the environment template:

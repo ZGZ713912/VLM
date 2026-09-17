@@ -24,7 +24,8 @@ mkdir -p \
   "${TORCH_HOME:-${HOME_DIR}/.cache/torch}" \
   "${HOME_DIR}/.config" \
   "${HOME_DIR}/.npm-global/bin" \
-  "${HOME_DIR}/.codex/tmp/arg0"
+  "${HOME_DIR}/.codex/tmp/arg0" \
+  "${HOME_DIR}/.local/share/opencode"
 
 if [ ! -e "${HOME_DIR}/.oh-my-zsh" ]; then
   if [ -d /opt/oh-my-zsh ]; then
