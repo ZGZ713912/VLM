@@ -55,7 +55,13 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    # 6) 有些算子（如某些 reduce 操作）在非确定性模式下更快，
+    # 6) cuBLAS 的 workspace 配置必须在第一次 CUDA 矩阵乘之前固定，
+    #    否则 use_deterministic_algorithms(True) 会在 CUDA >= 10.2 上直接报错：
+    #    "Deterministic behavior was enabled ... but this operation uses CuBLAS".
+    #    使用 setdefault 避免覆盖用户显式设置的环境变量。
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
+    # 7) 有些算子（如某些 reduce 操作）在非确定性模式下更快，
     #    关闭它以换取可复现性。注意：某些算子（如 ATen 的部分稀疏 op）
     #    不支持 deterministic 模式，如果遇到报错可以关闭这一行。
     try:

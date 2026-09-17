@@ -92,6 +92,19 @@ class CLIPBackbone(nn.Module):
 
         return F.normalize(x, dim=-1)                             # token 级 L2 归一化
 
+    def encode_text_pooled(self, prompts: list[str]) -> Tensor:
+        """完整 CLIP 文本编码（EOS 池化 + projection），返回 ``(K, D)``。
+
+        与 :meth:`encode_text` 的区别：
+            encode_text        → token 级序列 ``(K, L, D)``，供 Fusion 自己做池化
+            encode_text_pooled → 标准 CLIP 文本表征 ``(K, D)``，EOS 池化后归一化
+
+        Zero-shot 直接相似度匹配应使用后者（这也是 CLIP 官方用法），
+        而训练时的 Fusion 仍使用 token 序列以保留细粒度语义。
+        """
+        tokens = self._tokenizer(prompts).to(self.device)
+        return self._clip.encode_text(tokens, normalize=True)
+
     # ── 查询属性 ────────────────────────────────────────────────────
 
     @property
