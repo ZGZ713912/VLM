@@ -315,16 +315,20 @@ class Trainer:
 
     # ── 主入口 ────────────────────────────────────────────────────
 
-    def fit(self) -> dict[str, float]:
-        """完整训练流程：epoch 循环 + 验证 + checkpoint。"""
+    def fit(self, start_epoch: int = 1) -> dict[str, float]:
+        """完整训练流程：epoch 循环 + 验证 + checkpoint。
+
+        Args:
+            start_epoch: 起始 epoch（续训时传 resumed_epoch + 1）。
+        """
         log.info(
-            "Training started: epochs=%d, train_batches=%d, val_batches=%d, "
+            "Training started: epochs=%d..%d, train_batches=%d, val_batches=%d, "
             "device=%s, amp=%s",
-            self.epochs, len(self.train_loader), len(self.val_loader),
+            start_epoch, self.epochs, len(self.train_loader), len(self.val_loader),
             self.device, self.amp_enabled,
         )
 
-        for epoch in range(1, self.epochs + 1):
+        for epoch in range(start_epoch, self.epochs + 1):
             train_stats = self.train_epoch(epoch)
             log.info(
                 "Epoch %d train | loss=%.4f bce=%.4f contrastive=%.4f lr=%.2e",

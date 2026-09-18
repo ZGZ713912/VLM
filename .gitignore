@@ -34,8 +34,8 @@ logs/*
 !logs/.gitkeep
 results/*
 !results/.gitkeep
-configs/*
-!configs/.gitkeep
+# configs are the experiment contract — keep them tracked for reproducibility
+!configs/*.yaml
 
 # ── Model weights ───────────────────────────────────────────
 *.pt

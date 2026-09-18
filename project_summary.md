@@ -1,164 +1,80 @@
-# VLM-VAD 项目中期答辩准备总结
+# VLM-VAD 项目进展总结
 
-## 项目状态概览
+> 本文档记录**实际可运行**的状态。实验结果见 [experiment_results_template.md](experiment_results_template.md)。
 
-### 🎯 项目目标
-基于视觉语言模型（VLM）+ Prompt Engineering的视频异常检测与可解释性研究
+## 项目目标
 
-### ✅ 完成任务清单（10/10）
-1. ✅ **数据集问题解决**：识别并解决了Avenue数据集标注问题
-2. ✅ **Zero版本测试**：建立了完整的zero-shot测试框架
-3. ✅ **Prompt标注方案**：设计了三组prompt模板和标注工具
-4. ✅ **实验设计**：完成了多prompt分组实验方案
-5. ✅ **项目文档**：整理了完整的项目架构和技术文档
-6. ✅ **答辩准备**：准备了中期答辩材料和实验结果展示
+基于视觉语言模型（VLM）+ Prompt Engineering 的视频异常检测与可解释性研究。
 
-## 核心成果
+```
+Vision-Language Model + Prompt Engineering → Video Anomaly Detection + Explainability
+```
 
-### 📁 交付文件清单
+## 当前状态：端到端闭环已跑通
 
-#### 1. 数据集解决方案
-- **`dataset_solution.md`** - 详细的数据集问题分析和解决方案
-- **配置支持** - 运动伪标签模式配置
+| 模块 | 状态 | 证据 |
+|---|---|---|
+| 环境（Docker + GPU） | ✅ RTX 4060 Ti / CUDA 12.1 可用 | 容器内 `torch.cuda.is_available() == True` |
+| 数据集 | ✅ Avenue 已就位（16 train / 21 test） | `data/Avenue_Dataset/` |
+| 标签 | ⚠️ `motion_diff` 运动伪标签（非真实 mask） | `data/labels/` |
+| 配置契约 | ✅ 与代码完全对齐 | `configs/{experiment,prompts}.yaml` |
+| 模型前向 | ✅ backbone→alignment→fusion→head | `models/` |
+| Zero-shot | ✅ 真实指标 | `results/zero_shot_test.json` |
+| Prompt 消融 | ✅ 4 组实验对比 | `results/prompt_comparison.{json,md}` |
+| 微调训练 | ✅ 10 epoch，含 checkpoint / 续训 | `checkpoints/exp01/` |
+| 评估 + 可解释性 | ✅ metrics + explanations + 图 | `results/exp01/` |
 
-#### 2. 实验框架
-- **`configs/experiment.yaml`** - 基础实验配置
-- **`configs/prompts.yaml`** - Prompt模板配置
-- **`scripts/zero_shot_test.py`** - Zero-shot测试脚本
-- **`scripts/prompt_comparison.py`** - Prompt对比实验脚本
+## 核心结果（真实测量）
 
-#### 3. Prompt标注系统
-- **`prompt_annotation_guide.md`** - 标注指南和规范
-- **`tools/annotation_tool/`** - 完整的Web标注工具
-  - `app.py` - Flask后端应用
-  - `templates/` - 前端界面模板
-  - `README.md` - 工具使用说明
+| 指标 | Zero-shot（冻结 CLIP） | Fine-tuned（10 epoch） |
+|---|---|---|
+| Frame AUC | 0.4226 | **0.8422** |
+| Clip AUC | 0.4660 | **0.8411** |
+| Video AUC | 0.8000 | **1.0000** |
 
-#### 4. 项目文档
-- **`midterm_presentation.md`** - 中期答辩完整文档
-- **`experiment_results_template.md`** - 实验结果展示模板
-- **`project_summary.md`** - 项目总结文档
+Prompt 消融中 `scene_only` 帧级最好（0.5111），`all_types`（31 prompt）反而更低。
 
-#### 5. 技术架构
-- **模块化设计** - 完整的模型、数据、训练、评估模块
-- **配置驱动** - YAML配置文件控制实验流程
-- **可扩展性** - 支持不同的backbone、fusion、temporal模块
+> ⚠️ 上述均为 `motion_diff` 伪标签下的结果，用于验证框架，**不能作为学术结论**。
+> 详见实验结果文档 §6「关键发现与局限」。
 
-## 技术创新点
+## 已验证的工程修复
 
-### 1. Prompt Engineering创新
-- **多类型Prompt设计**：Label、Scene、Contrast三种类型
-- **自适应Prompt选择**：根据异常类型自动选择最优prompt
-- **Prompt组合策略**：探索不同prompt的协同效应
+1. **配置 schema 不匹配**：旧 config 缺少 `data.root` / `paths.run_name` / `model.alignment` 等，`load_experiment_config` 直接崩溃 → 已按代码实际键重写。
+2. **scripts 语法错误 + 假指标**：`zero_shot_test.py` 有语法错误，两个脚本硬编码返回 `0.5` → 已基于真实模型重写。
+3. **GPU 确定性 bug**：`set_seed` 未设 `CUBLAS_WORKSPACE_CONFIG`，所有 CUDA 矩阵乘报错 → 已修复。
+4. **续训 bug**：`Trainer.fit()` 忽略已训练 epoch，续训从头开始 → 已修复（`start_epoch`）。
+5. **可复现性**：`configs/*.yaml` 曾被 gitignore，且运行不保存配置 → 已取消忽略并自动快照到 `results/{run}/config.yaml`。
 
-### 2. Zero-shot检测机制
-- **无需训练**：直接使用预训练CLIP进行异常检测
-- **可解释性强**：通过prompt提供直观的异常解释
-- **灵活性强**：支持快速更换prompt进行实验
+## 复现（一条命令链）
 
-### 3. 完整的实验体系
-- **多维度对比**：不同prompt类型、数量、质量的全面对比
-- **自动化评估**：完整的指标计算和可视化
-- **可复现性**：详细的配置和文档支持
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-recreate
 
-## 实验验证计划
+python tools/extract_video_features.py --root data --split training --out data/features/training --device cuda
+python tools/extract_video_features.py --root data --split testing  --out data/features/testing  --device cuda
+python tools/extract_motion_labels.py  --root data --split training --threshold 3.0 --out data/labels
+python tools/extract_motion_labels.py  --root data --split testing  --threshold 3.0 --out data/labels
 
-### 🔬 立即执行（本周）
-1. **运行zero-shot测试**
-   ```bash
-   python scripts/zero_shot_test.py --config configs/experiment.yaml --prompts all
-   ```
+python scripts/zero_shot_test.py  --config configs/experiment.yaml --prompts label
+python scripts/prompt_comparison.py --config configs/experiment.yaml
+python train.py --config configs/experiment.yaml
+python eval.py  --config configs/experiment.yaml --ckpt checkpoints/exp01/best.pt
+```
 
-2. **完成prompt对比实验**
-   ```bash
-   python scripts/prompt_comparison.py --config configs/experiment.yaml
-   ```
+## 下一步（按优先级）
 
-### 📊 中期答辩准备（下周）
-1. **填充实验结果**：将实际结果填入 `experiment_results_template.md`
-2. **制作演示材料**：准备PPT和系统演示
-3. **完善答辩文档**：更新 `midterm_presentation.md`
+1. **获取 Avenue 官方二值 mask** → 切 `frame_label_mode: pixel` 重新评估（当前首要阻塞）。
+2. 解冻 CLIP backbone 做真正端到端微调。
+3. Fusion / Temporal 消融（`concat|gated|crossattn` × `identity|transformer`）。
+4. 扩展 UCF-Crime（视频级标签）验证泛化。
 
-### 🚀 后续发展（1-2月）
-1. **获取真实标注**：尝试获取Avenue真实二值标注
-2. **实现端到端训练**：解冻backbone进行微调
-3. **扩展数据集**：集成UCF-Crime等数据集
+## 交付文件
 
-## 应用价值
-
-### 🎯 实际应用场景
-1. **智能监控**：商场、银行、机场等公共场所
-2. **交通管理**：交通违规和异常事件检测
-3. **工业安全**：工厂车间安全监控
-4. **社区安防**：居民小区安全监控
-
-### 💡 技术优势
-- **零样本学习**：减少对标注数据的依赖
-- **可解释性强**：提供文本形式的异常解释
-- **实时检测**：支持实时视频处理
-- **灵活配置**：快速适应不同场景需求
-
-## 风险评估与应对
-
-### ⚠️ 潜在风险
-1. **数据集质量**：标注文件可能不准确
-2. **性能上限**：zero-shot性能可能有限
-3. **计算资源**：大模型需要较多计算资源
-
-### 🛡️ 应对策略
-1. **多数据源**：准备多个备选数据集
-2. **渐进优化**：从zero-shot到fine-tuning逐步提升
-3. **模型优化**：使用轻量级模型和优化技术
-
-## 项目亮点
-
-### 🏆 技术亮点
-1. **完整的实验框架**：从数据处理到结果评估的完整流程
-2. **创新prompt设计**：针对视频异常检测的专门prompt模板
-3. **模块化架构**：高度可扩展和可配置的系统设计
-4. **实用工具**：完整的标注工具和可视化界面
-
-### 📈 学术价值
-1. **零样本视频异常检测**：前沿的研究方向
-2. **多模态融合**：视觉-语言的有效结合
-3. **可解释AI**：提供直观的检测结果解释
-4. **可复现研究**：完整的代码和文档支持
-
-## 下一步行动建议
-
-### 🎯 立即行动（本周）
-1. **运行实验**：执行zero-shot测试获取基础结果
-2. **完善文档**：根据实验结果更新答辩材料
-3. **准备演示**：搭建演示环境，准备系统演示
-
-### 📋 中期目标（1-2周）
-1. **实验优化**：根据初步结果优化实验配置
-2. **工具完善**：完善标注工具的用户体验
-3. **文档完善**：补充详细的技术文档
-
-### 🚀 长期目标（1-2月）
-1. **性能提升**：实现端到端训练提升性能
-2. **数据集扩展**：集成更多数据集验证泛化性
-3. **应用落地**：与合作伙伴进行实际应用测试
-
-## 总结
-
-VLM-VAD项目已经建立了完整的技术框架和实验体系，具备了以下核心优势：
-
-### ✅ 已完成的核心工作
-1. **技术架构**：完整的模块化设计
-2. **实验框架**：zero-shot测试和prompt对比实验
-3. **标注系统**：完整的Web标注工具
-4. **文档体系**：详细的技术和项目文档
-
-### 🎯 创新价值
-1. **Prompt Engineering**：针对视频异常检测的创新应用
-2. **Zero-shot检测**：无需训练的异常检测方法
-3. **可解释性**：直观的文本解释机制
-
-### 📊 预期成果
-1. **学术成果**：高水平论文和开源项目
-2. **技术成果**：实用化的检测系统
-3. **应用成果**：行业应用和商业价值
-
-项目已经为中期答辩做好了充分准备，下一步重点完成实验验证和结果展示，为后续研究奠定坚实基础。整个项目体现了从理论研究到实际应用的完整技术链条，具有重要的学术价值和实用意义。
+- 模型：`models/`（config-driven factory）
+- 数据：`datasets/`（VideoDataset / FeatureDataset 自动切换）
+- Prompt：`prompts/`（模板 + 扩展 + 极性）
+- 训练：`train/`、`train.py`
+- 评估：`eval/`（`inference.py` 微调评估、`zero_shot.py` 零样本）、`eval.py`
+- 脚本：`scripts/{zero_shot_test,prompt_comparison}.py`
+- 工具：`tools/extract_*.py`、`tools/annotation_tool/`
+- 结果：`results/`、`experiment_results_template.md`

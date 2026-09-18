@@ -27,7 +27,7 @@ from datasets.builders import build_split_dataloader
 from eval.zero_shot import evaluate_zero_shot
 from models.backbone import CLIPBackbone
 from models.factory import build_prompt_processor
-from utils.config import load_experiment_config
+from utils.config import load_experiment_config, save_config_snapshot
 from utils.io import ensure_dirs
 from utils.logging import get_logger
 from utils.reproducibility import set_seed
@@ -57,6 +57,8 @@ def main() -> None:
     out_dir = Path(args.out_dir) if args.out_dir else Path(args.output).parent / f"zero_shot_{args.prompts}"
 
     log.info("Zero-shot test | config=%s device=%s prompts=%s", args.config, device, args.prompts)
+    ensure_dirs({"result": Path(args.output).parent, "out": out_dir})
+    save_config_snapshot(cfg, out_dir / "config.yaml")
 
     backbone = CLIPBackbone(
         model_name=str(cfg.model.backbone.name),

@@ -28,7 +28,7 @@ import torch
 from datasets.builders import build_split_dataloader
 from eval.inference import evaluate_videos
 from models.factory import build_matcher, build_model
-from utils.config import load_experiment_config
+from utils.config import load_experiment_config, save_config_snapshot
 from utils.io import ensure_dirs, load_checkpoint
 from utils.logging import get_logger
 from utils.reproducibility import set_seed
@@ -48,6 +48,9 @@ def main() -> None:
     set_seed(int(cfg.seed))
     device = torch.device(str(cfg.device))
     dirs = ensure_dirs({"result": cfg.paths.result_dir})
+    save_config_snapshot(
+        cfg, dirs["result"] / str(cfg.paths.run_name) / "config.yaml",
+    )
 
     eval_split = args.eval_split if args.eval_split else str(cfg.data.eval_split)
     eval_loader, src = build_split_dataloader(

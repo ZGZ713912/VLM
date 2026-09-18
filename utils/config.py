@@ -54,3 +54,19 @@ def load_experiment_config(path: str | Path) -> DictConfig:
         import torch
         cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
     return cfg
+
+
+def save_config_snapshot(cfg: DictConfig, path: str | Path) -> Path:
+    """把合并后的完整配置落盘到 results/，保证实验可复现（AGENTS.md §7）。
+
+    Args:
+        cfg: load_experiment_config() 返回的完整配置。
+        path: 输出路径（通常 ``{result_dir}/{run_name}/config.yaml``）。
+
+    Returns:
+        实际写入的 Path。
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    OmegaConf.save(cfg, str(path))
+    return path

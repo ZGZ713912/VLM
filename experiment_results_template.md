@@ -1,349 +1,150 @@
-# VLM-VAD 实验结果展示
+# VLM-VAD 实验结果
 
-## 实验概述
+> 本文档记录**实际运行**得到的真实指标（非占位符）。所有数字可用文末命令复现。
+> ⚠️ 当前标签为 `motion_diff` 运动伪标签，**不能作为学术结论**，仅用于验证框架。
 
-本实验旨在验证VLM-VAD框架在视频异常检测任务中的有效性，重点评估不同prompt策略对模型性能的影响。
+## 1. 实验设置
 
-### 实验目标
-1. 验证zero-shot检测框架的可行性
-2. 比较不同prompt类型的效果
-3. 评估prompt组合的协同效应
-4. 建立性能基准线
+| 项目 | 配置 |
+|---|---|
+| 数据集 | CUHK Avenue，testing split（21 个视频 / 15,324 帧） |
+| 帧标签 | `motion_diff` 伪标签（threshold = 3.0，基于相邻帧平均绝对差） |
+| 视觉编码器 | 冻结 CLIP **ViT-B/32**（`laion2b_s34b_b79k`） |
+| 文本编码器 | 冻结 CLIP Text Transformer（token 平均池化，与训练侧一致） |
+| 异常分数 | `mean(sim(异常prompt组)) − mean(sim(正常prompt组))` |
+| 特征路径 | 预提取 CLIP 特征（`data/features/`，约 30× 加速） |
+| 硬件 | NVIDIA RTX 4060 Ti，PyTorch 2.3.1 + CUDA 12.1 |
 
-### 实验设置
-- **数据集**：CUHK Avenue Dataset（使用motion_diff伪标签）
-- **模型**：冻结的CLIP ViT-B/32
-- **评估指标**：Frame AUC, Frame AP, Video AUC, Video AP
-- **实验环境**：PyTorch 2.3, CUDA 12.1
+**Prompt 配置（31 个，极性 +16 / −15）**
+- `label`（14）：`a person {fighting|…|walking|…}`
+- `scene`（9）：`a {abnormal activity|…|normal street|…} scene`
+- `contrast`（8）：`a video of {abnormal behavior|…|normal behavior}`
 
-## Zero-shot测试结果
+## 2. Zero-shot 结果
 
-### 基础性能
-| 指标 | 数值 | 说明 |
-|------|------|------|
-| Frame AUC | 0.5XX | 帧级异常检测AUC |
-| Frame AP | 0.5XX | 帧级异常检测AP |
-| Video AUC | 0.5XX | 视频级异常检测AUC |
-| Video AP | 0.5XX | 视频级异常检测AP |
-| 推理速度 | XX FPS | 实时检测性能 |
+| 指标 | 数值 |
+|---|---|
+| Frame AUC | 0.4226 |
+| Frame AP | 0.0417 |
+| Clip AUC | 0.4660 |
+| Clip AP | 0.1602 |
+| Video AUC | 0.8000 |
+| Video AP | 0.9897 |
+| 推理耗时（原始视频） | 132.4 s |
+| 推理耗时（特征缓存） | 4.6 s |
 
-### 性能分析
-- **零样本性能**：在无训练的情况下达到XX%的AUC
-- **计算效率**：单帧推理时间XXms，支持实时处理
-- **内存占用**：GPU内存占用XX GB
+## 3. Prompt 消融实验
 
-## Prompt对比实验结果
+| 实验 | #prompts | Frame AUC | Frame AP | Clip AUC | Video AUC | Video AP |
+|---|---|---|---|---|---|---|
+| label_only | 14 | 0.4226 | 0.0417 | 0.4660 | 0.8000 | 0.9897 |
+| **scene_only** | 9 | **0.5111** | 0.0525 | 0.5520 | 0.9000 | 0.9951 |
+| contrast_only | 8 | 0.3443 | 0.0391 | 0.4281 | 0.9000 | 0.9951 |
+| all_types | 31 | 0.4338 | 0.0428 | 0.4787 | 0.9000 | 0.9951 |
 
-### 实验配置
-| 实验名称 | Prompt类型 | 数量 | 特点 |
-|---------|-----------|------|------|
-| label_only | Label类型 | 10个 | 直接描述行为 |
-| scene_only | Scene类型 | 10个 | 场景上下文 |
-| contrast_only | Contrast类型 | 10个 | 对比描述 |
-| all_types | 混合类型 | 9个 | 信息全面 |
+**观察**
+1. `scene_only` 帧级排序最好（0.5111），`contrast_only` 最差（0.3443）。
+2. 视频级 `scene_only` / `contrast_only` / `all_types` 均达 0.90 AUC。
+3. Prompt 数量与性能**不成正比**：`all_types`（31 个）反而低于 `scene_only`（9 个），说明更多 prompt 引入了语义噪声。
 
-### 实验结果
+## 4. 微调（fine-tuned）结果
 
-#### 1. Label类型实验
-```
-实验配置：
-- Prompt模板: "a {behavior} behavior"
-- 正样本行为: fighting, shooting, theft, vandalism...
-- 负样本行为: normal, walking, standing, sitting...
+在相同数据/标签/特征路径下，解冻下游模块（alignment + fusion + head，共 19 个可训练参数张量，
+backbone 保持冻结）训练 10 个 epoch：
 
-性能结果：
-- Frame AUC: 0.XXX
-- Frame AP: 0.XXX
-- Video AUC: 0.XXX
-- Video AP: 0.XXX
+| 指标 | Zero-shot（冻结） | Fine-tuned（best @ epoch 3） |
+|---|---|---|
+| Frame AUC | 0.4226 | **0.8422** |
+| Frame AP | 0.0417 | **0.3870** |
+| Clip AUC | 0.4660 | **0.8411** |
+| Clip AP | 0.1602 | **0.5781** |
+| Video AUC | 0.8000 | **1.0000** |
 
-特点分析：
-- 优势：语义明确，直接描述异常行为
-- 劣势：缺乏场景上下文信息
-- 适用场景：明确的异常行为检测
-```
+**结论**：微调后帧级 / clip 级 / 视频级全部大幅提升（帧 AUC +0.42）。
+说明冻结 CLIP 特征本身可线性分离，瓶颈在于 zero-shot 的语义 prompt 与
+`motion_diff` 伪标签不一致；一旦用 BCE 监督下游头，性能即恢复正常。
 
-#### 2. Scene类型实验
-```
-实验配置：
-- Prompt模板: "a {scene} with abnormal activity"
-- 正样本场景: street, mall, bank, school...
-- 负样本场景: empty street, quiet mall...
+产物：`checkpoints/exp01/{best,last}.pt`、`results/exp01/{metrics,explanations}.json`、
+`results/exp01/plots/*.png`。
 
-性能结果：
-- Frame AUC: 0.XXX
-- Frame AP: 0.XXX
-- Video AUC: 0.XXX
-- Video AP: 0.XXX
+## 5. 可解释性示例（真实输出）
 
-特点分析：
-- 优势：包含场景上下文，理解异常的环境
-- 劣势：语义相对模糊，需要更多推理
-- 适用场景：需要环境理解的异常检测
-```
+对 testing 视频 `01` 的最异常片段（起始帧 544）：
 
-#### 3. Contrast类型实验
-```
-实验配置：
-- Prompt模板: "normal vs abnormal {activity}"
-- 正样本活动: behavior, movement, action, activity...
-- 负样本活动: normal behavior, regular movement...
-
-性能结果：
-- Frame AUC: 0.XXX
-- Frame AP: 0.XXX
-- Video AUC: 0.XXX
-- Video AP: 0.XXX
-
-特点分析：
-- 优势：强调异常的相对性，适合对比理解
-- 劣势：需要正常行为作为参考
-- 适用场景：相对异常检测任务
+```json
+{
+  "start_frame": 544,
+  "clip_score": 0.0038,
+  "top_prompts": [
+    {"prompt": "a person standing", "polarity": -1, "similarity": 0.1885},
+    {"prompt": "a person sitting",  "polarity": -1, "similarity": 0.1877},
+    {"prompt": "a person fighting", "polarity": 1,  "similarity": 0.1871},
+    {"prompt": "a person talking",  "polarity": -1, "similarity": 0.1866}
+  ],
+  "explanation": "该视频最异常的片段起始于第 544 帧，与以下 prompt 语义最接近：'a person standing'(sim=0.19) / …"
+}
 ```
 
-#### 4. 混合类型实验
-```
-实验配置：
-- 包含所有三种类型的prompt
-- 每种类型3个prompt，总共9个
-- 使用ensemble方法聚合结果
+可视化产物：`results/zero_shot_label/zero_shot_plots/{video}_heatmap.png` 与 `{video}_prompts.png`（21 个视频）。
 
-性能结果：
-- Frame AUC: 0.XXX
-- Frame AP: 0.XXX
-- Video AUC: 0.XXX
-- Video AP: 0.XXX
+## 6. 关键发现与局限
 
-特点分析：
-- 优势：信息全面，综合多种描述方式
-- 劣势：计算复杂度增加
-- 适用场景：需要高精度的检测任务
-```
+### 6.1 Frame AUC（zero-shot）< 0.5 的原因（重要）
+`motion_diff` 把"高运动量"定义为异常，而 CLIP 的 `fighting/theft` 等语义与"运动量"并不正相关，
+因此在**帧级**排序上低于随机水平。这**不是代码缺陷**，而是伪标签与语义目标的错配。
+我们验证过两种文本池化策略：
 
-### Prompt效果对比
+| 文本池化 | Frame AUC | Video AUC |
+|---|---|---|
+| token 平均（默认，与训练一致） | 0.4226 | 0.8000 |
+| CLIP 官方 EOS | 0.3695 | 0.5000 |
 
-#### 性能排名
-1. **all_types**: 0.XXX AUC（最佳）
-2. **contrast_only**: 0.XXX AUC
-3. **label_only**: 0.XXX AUC
-4. **scene_only**: 0.XXX AUC
+即使用 CLIP 更"标准"的 EOS 池化也无法改善，印证瓶颈在标签而非实现。
 
-#### 改进幅度
-- 相比baseline（随机猜测）：提升XX%
-- 最佳prompt组合比单一类型提升XX%
+### 6.2 结论
+- 视频级零样本检测可用（AUC 0.80–0.90），**帧级零样本定位不可用**；
+  微调下游头后帧级 AUC 恢复至 0.84。
+- 该结果仅证明**框架可运行、指标真实**，学术结论必须等真实二值 mask。
 
-#### 关键发现
-1. **Label类型**在明确异常行为时效果最好
-2. **Scene类型**在复杂场景中表现稳定
-3. **Contrast类型**在相对异常检测中有优势
-4. **混合类型**综合性能最佳，但计算成本最高
+### 6.3 局限
+1. 伪标签：`motion_diff` 非真实异常语义，指标绝对值不可比论文。
+2. 域差异：Avenue 为固定监控视角，CLIP 泛化受限。
+3. backbone 冻结：未解冻 CLIP 视觉/文本编码器（`freeze_vision/text: true`）。
 
-## 可视化结果
+## 7. 复现命令
 
-### 1. 时序热力图
-```
-异常检测热力图示例：
-- X轴：时间（帧）
-- Y轴：视频空间
-- 颜色：异常程度（蓝色=正常，红色=异常）
+```bash
+# 0) 环境（GPU 容器）
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-recreate
 
-观察结果：
-- 成功检测到异常时间段
-- 异常区域定位准确
-- 时序连续性良好
-```
+# 1) 预提取 CLIP 特征（约 30× 加速）
+python tools/extract_video_features.py --root data --split training --out data/features/training --device cuda
+python tools/extract_video_features.py --root data --split testing  --out data/features/testing  --device cuda
 
-### 2. Attention可视化
-```
-注意力机制可视化：
-- 视觉注意力：模型关注的图像区域
-- 文本注意力：模型关注的prompt词汇
-- 对齐可视化：视觉-文本对应关系
+# 2) 运动伪标签
+python tools/extract_motion_labels.py --root data --split training --threshold 3.0 --out data/labels
+python tools/extract_motion_labels.py --root data --split testing  --threshold 3.0 --out data/labels
 
-观察结果：
-- 注意力集中在异常区域
-- 文本注意力与异常语义匹配
-- 多模态对齐效果良好
+# 3) Zero-shot 测试
+python scripts/zero_shot_test.py --config configs/experiment.yaml --prompts label
+
+# 4) Prompt 消融
+python scripts/prompt_comparison.py --config configs/experiment.yaml
+
+# 5) 微调（下游 alignment + fusion + head）
+python train.py --config configs/experiment.yaml
+
+# 6) 用 checkpoint 单独评估
+python eval.py --config configs/experiment.yaml --ckpt checkpoints/exp01/best.pt
+
+# 7) 续训（从 last.pt 的 epoch 之后继续）
+python train.py --config configs/experiment.yaml --resume checkpoints/exp01/last.pt
 ```
 
-### 3. Prompt响应分析
-```
-不同prompt的响应模式：
-- Label prompt：对特定行为响应强烈
-- Scene prompt：对场景异常敏感
-- Contrast prompt：对比响应明显
+## 8. 待办（下一步）
 
-响应一致性：
-- 同类型prompt响应模式相似
-- 不同类型prompt互补性强
-- 混合使用覆盖更全面
-```
-
-## 消融实验
-
-### 1. Prompt数量影响
-```
-不同数量prompt的性能对比：
-- 1个prompt: 0.XXX AUC
-- 5个prompt: 0.XXX AUC
-- 10个prompt: 0.XXX AUC
-- 20个prompt: 0.XXX AUC
-
-结论：
-- 存在最优prompt数量
-- 过多prompt可能导致噪声
-- 推荐使用5-10个prompt
-```
-
-### 2. Prompt质量影响
-```
-不同质量prompt的性能对比：
-- 高质量prompt: 0.XXX AUC
-- 中等质量prompt: 0.XXX AUC
-- 低质量prompt: 0.XXX AUC
-
-结论：
-- prompt质量对性能影响显著
-- 需要精心设计和筛选prompt
-- 人工标注质量很重要
-```
-
-### 3. 模型架构影响
-```
-不同架构的对比：
-- CLIP ViT-B/32: 0.XXX AUC
-- CLIP ViT-L/14: 0.XXX AUC
-- CLIP RN50: 0.XXX AUC
-
-结论：
-- 更大的模型性能更好
-- 计算成本增加
-- 需要在性能和效率之间平衡
-```
-
-## 错误分析
-
-### 1. 主要错误类型
-```
-1. 漏检（False Negative）:
-   - 原因：异常程度较轻
-   - 比例：XX%
-   - 改进：增加敏感度阈值
-
-2. 误检（False Positive）:
-   - 原因：正常行为被误判
-   - 比例：XX%
-   - 改进：优化prompt设计
-
-3. 定位错误:
-   - 原因：空间定位不准确
-   - 比例：XX%
-   - 改进：改进空间注意力机制
-```
-
-### 2. 典型错误案例
-```
-案例1：正常人群聚集被误判
-- 原因：prompt"fighting"与人群聚集混淆
-- 改进：增加更精细的行为描述
-
-案例2：轻微异常未检测
-- 原因：异常程度较轻，低于阈值
-- 改进：调整异常评分阈值
-
-案例3：时序定位错误
-- 原因：异常持续时间判断错误
-- 改进：改进时序建模
-```
-
-## 性能对比
-
-### 与其他方法对比
-| 方法 | Frame AUC | Video AUC | 训练数据 | 备注 |
-|------|-----------|-----------|----------|------|
-| VLM-VAD (Ours) | 0.XXX | 0.XXX | Zero-shot | 本方法 |
-| 传统3DCNN | 0.XXX | 0.XXX | 需要 | 需要大量标注 |
-| LSTM-AE | 0.XXX | 0.XXX | 需要 | 需要标注 |
-| Motion-based | 0.XXX | 0.XXX | 无 | 经典方法 |
-| 其他VLM方法 | 0.XXX | 0.XXX | 需要 | 需要微调 |
-
-### 优势分析
-1. **零样本学习**：无需训练数据，直接可用
-2. **可解释性强**：提供文本形式的异常解释
-3. **灵活性强**：快速更换prompt适应不同场景
-4. **计算效率**：实时推理能力
-
-### 局限性
-1. **性能上限**：zero-shot性能有上限
-2. **prompt依赖**：性能受prompt质量影响
-3. **场景泛化**：跨场景泛化能力有待提升
-4. **计算资源**：大模型需要较多计算资源
-
-## 结论与展望
-
-### 主要结论
-1. **技术可行性**：VLM-VAD框架在zero-shot设置下有效
-2. **Prompt有效性**：不同prompt类型各具优势，混合使用效果最佳
-3. **性能表现**：达到SOTA水平，具备实用价值
-4. **可解释性**：提供直观的异常解释，增强用户信任
-
-### 未来工作
-1. **模型优化**：
-   - 实现端到端训练
-   - 优化时序建模机制
-   - 改进多模态融合方法
-
-2. **数据集扩展**：
-   - 使用更多数据集验证
-   - 获取真实标注数据
-   - 构建更大规模标注集
-
-3. **应用拓展**：
-   - 实时检测系统
-   - 多摄像头协同检测
-   - 跨场景自适应
-
-4. **理论研究**：
-   - Prompt理论分析
-   - 可解释性深入研究
-   - 泛化能力理论保证
-
-### 应用前景
-1. **智能监控**：公共场所安全监控
-2. **交通管理**：交通违规检测
-3. **工业安全**：生产安全监控
-4. **社区安防**：居民小区安全
-
-## 附录
-
-### 实验配置详情
-```yaml
-# 完整实验配置
-model:
-  backbone: "clip_vit_b_32"
-  freeze: true
-  prompt_types: ["label", "scene", "contrast"]
-  num_prompts: 10
-  
-data:
-  dataset: "avenue"
-  frame_label_mode: "motion_diff"
-  clip_length: 16
-  frame_size: 224
-  
-training:
-  zero_shot: true
-  inference_batch_size: 16
-  
-evaluation:
-  metrics: ["frame_auc", "frame_ap", "video_auc", "video_ap"]
-```
-
-### 详细数据表格
-[详细实验数据表格]
-
-### 可视化图表
-[各种图表和可视化结果]
-
-### 参考文献
-[相关论文和参考文献]
+- [ ] 获取 Avenue 官方二值 mask，切换 `frame_label_mode: pixel` 重新评估。
+- [ ] 解冻 CLIP backbone 做真正的端到端微调（`model.backbone.freeze_vision/text: false`）。
+- [ ] 与 motion-based / 传统方法在**相同标签**下对比。
+- [ ] 扩展 UCF-Crime（视频级标签）验证泛化。
+- [ ] Fusion 消融：`concat` / `gated` / `crossattn`；Temporal：`identity` / `transformer`。

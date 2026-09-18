@@ -1,5 +1,10 @@
 # VLM-VAD 项目中期答辩文档
 
+> **进展更新（已实现端到端）**：环境/数据/配置/训练/评估/zero-shot/prompt 消融全部跑通。
+> 真实指标：zero-shot video AUC 0.80–0.90；微调 10 epoch 后 frame AUC 0.84 / video AUC 1.00。
+> 详见 [experiment_results_template.md](experiment_results_template.md) 与 [project_summary.md](project_summary.md)。
+> ⚠️ 当前使用 `motion_diff` 伪标签，结果仅用于验证框架。
+
 ## 项目概述
 
 ### 项目名称
@@ -25,7 +30,7 @@ Vision-Language Model + Prompt Engineering → Video Anomaly Detection + Explain
   - 创建了 `dataset_solution.md` 详细文档
   - 提供了三种解决方案：获取真实标注、使用运动伪标签、切换数据集
   - 配置支持 `frame_label_mode: motion_diff` 快速验证
-- **当前状态**：已配置运动伪标签模式，可立即开始实验
+- **当前状态**：运动伪标签模式已配置并完成 zero-shot / prompt 消融 / 微调全流程。
 
 #### 2. Zero版本测试框架
 - **完成内容**：
@@ -73,10 +78,11 @@ Vision-Language Model + Prompt Engineering → Video Anomaly Detection + Explain
 
 ### 📋 待完成任务
 
-#### 6. 实验结果展示
-- 需要运行zero-shot测试生成实际结果
-- 需要完成prompt对比实验
-- 需要准备可视化展示材料
+#### 6. 实验结果展示（已完成初版）
+- ✅ 已运行 zero-shot 测试并生成真实结果（`results/zero_shot_test.json`）
+- ✅ 已完成 prompt 对比实验（`results/prompt_comparison.{json,md}`）
+- ✅ 已生成可视化材料（`results/*/plots/*.png`、`results/*/explanation*.json`）
+- ⏳ 待补充：真实二值 mask 下的正式结果
 
 ## 技术架构详解
 
@@ -213,14 +219,14 @@ VLMVADLoss = α * AnomalyClassificationLoss + β * ContrastiveLoss
 ## 下一步计划
 
 ### 1. 短期目标（1-2周）
-- [ ] 运行zero-shot测试，获取基础结果
-- [ ] 完成prompt对比实验
-- [ ] 准备中期答辩材料
+- [x] 运行zero-shot测试，获取基础结果
+- [x] 完成prompt对比实验
+- [x] 准备中期答辩材料
 
 ### 2. 中期目标（1-2月）
-- [ ] 获取真实数据集标注
-- [ ] 实现端到端训练
-- [ ] 优化模型架构
+- [ ] 获取真实数据集标注（当前首要阻塞）
+- [x] 实现端到端训练（下游 alignment+fusion+head）
+- [ ] 优化模型架构（fusion / temporal 消融）
 
 ### 3. 长期目标（3-6月）
 - [ ] 扩展到多个数据集

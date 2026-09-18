@@ -33,7 +33,7 @@ from datasets.builders import build_split_dataloader
 from eval.inference import evaluate_videos
 from models.factory import build_matcher, build_model
 from train.trainer import Trainer, resume_from_checkpoint
-from utils.config import load_experiment_config
+from utils.config import load_experiment_config, save_config_snapshot
 from utils.io import ensure_dirs
 from utils.logging import get_logger
 from utils.reproducibility import set_seed
@@ -45,10 +45,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train VLM-VAD")
     parser.add_argument("--config", default="configs/experiment.yaml")
     parser.add_argument("--resume", default=None, help="Checkpoint to resume from")
+    parser.add_argument("--epochs", type=int, default=None,
+                        help="Override cfg.train.epochs (smoke tests)")
+    parser.add_argument("--run-name", default=None,
+                        help="Override cfg.paths.run_name")
     args = parser.parse_args()
 
     # ── 1. 配置 ──────────────────────────────────────────────
     cfg = load_experiment_config(args.config)
+    if args.epochs is not None:
+        cfg.train.epochs = int(args.epochs)
+    if args.run_name is not None:
+        cfg.paths.run_name = str(args.run_name)
     set_seed(int(cfg.seed))  # 先固定种子，再构建数据/模型 → 全部可复现
     log.info("Config loaded: %s (device=%s, seed=%d)", args.config, cfg.device, cfg.seed)
 
@@ -58,6 +66,9 @@ def main() -> None:
         "checkpoint": cfg.paths.checkpoint_dir,
         "result": cfg.paths.result_dir,
     })
+    save_config_snapshot(
+        cfg, dirs["result"] / str(cfg.paths.run_name) / "config.yaml",
+    )
 
     # ── 2. 数据 ──────────────────────────────────────────────
     train_loader, train_src = build_split_dataloader(
@@ -90,9 +101,10 @@ def main() -> None:
     )
 
     if args.resume:
-        resume_from_checkpoint(trainer, args.resume)
-
-    trainer.fit()
+        resumed_epoch = resume_from_checkpoint(trainer, args.resume)
+        trainer.fit(start_epoch=resumed_epoch + 1)
+    else:
+        trainer.fit()
 
     # ── 5. 视频级评估（用最优 checkpoint 的权重）────────────────
     best_ckpt = Path(cfg.paths.checkpoint_dir) / str(cfg.paths.run_name) / "best.pt"
