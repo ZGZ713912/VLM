@@ -30,6 +30,7 @@ from tqdm import tqdm
 from eval.metrics import clip_level_metrics, frame_level_metrics, video_level_metrics
 from models import VLMModel
 from models.matcher import Matcher
+from train.losses import build_prompt_polarity
 from utils.io import save_json
 from utils.logging import get_logger
 from utils.visualization import (
@@ -69,6 +70,7 @@ def evaluate_videos(
     top_k: int = 5,
     out_dir: str | Path | None = None,
     save_plots: bool = True,
+    cfg: Any | None = None,
 ) -> dict[str, Any]:
     """对整个数据集做视频级评估，返回指标 + 解释 + 可视化文件。
 
@@ -88,9 +90,13 @@ def evaluate_videos(
         top_k: 解释时取相似度最高的前 k 个异常 prompt。
         out_dir: 结果输出目录（None 则不落盘）。
         save_plots: 是否保存可视化图。
+        cfg: 完整实验配置（可选）。传入后会计算 prompt 极性，使解释只从
+            **异常极性** 的 prompt 中选 top-k，避免用正常 prompt 解释异常。
 
     Returns:
-        dict：{"metrics": ..., "per_video": ..., "explanations": ...}。
+        dict：{"metrics", "per_video", "explanations", "frame_score", "frame_label"}。
+        ``frame_score`` / ``frame_label`` 为 ``{video_id: (N,) ndarray}``，
+        即整段视频的稠密逐帧分数与标签，供可视化 demo 直接复用。
     """
     model.eval()
     model.to(device)
@@ -99,6 +105,9 @@ def evaluate_videos(
 
     prompts = model.prompt_processor.process()
     prompts_with_types = model.prompt_processor.process_with_types()
+    polarity = (
+        build_prompt_polarity(prompts, cfg.prompt) if cfg is not None else None
+    )
 
     # ── 每视频的累计状态 ─────────────────────────────────────────
     accum: dict[str, np.ndarray] = {}    # video_id → 分数累加
@@ -169,6 +178,8 @@ def evaluate_videos(
 
     # ── 每视频逐帧分数 = 累加/覆盖次数（等权平均）─────────────────
     per_video: dict[str, Any] = {}
+    dense_scores: dict[str, np.ndarray] = {}
+    dense_labels: dict[str, np.ndarray] = {}
     global_frame_scores: list[np.ndarray] = []
     global_frame_labels: list[np.ndarray] = []
     video_scores: dict[str, float] = {}
@@ -183,6 +194,8 @@ def evaluate_videos(
         per_video[vid]["num_frames"] = int(len(lab))
         per_video[vid]["num_anomaly_frames"] = int(lab.sum())
 
+        dense_scores[vid] = scores
+        dense_labels[vid] = lab
         global_frame_scores.append(scores)
         global_frame_labels.append(lab)
         # 视频级：用 clip 分数上确界近似视频分数（任一异常片段→视频异常）
@@ -211,6 +224,7 @@ def evaluate_videos(
     explanations = _build_explanations(
         model, worst_clips, prompts_with_types,
         top_k=top_k, out_dir=out_dir, save_plots=save_plots,
+        polarity=polarity,
     )
 
     if out_dir is not None:
@@ -223,6 +237,8 @@ def evaluate_videos(
         "metrics": metrics,
         "per_video": per_video,
         "explanations": explanations,
+        "frame_score": dense_scores,
+        "frame_label": dense_labels,
     }
 
 
@@ -233,15 +249,28 @@ def _build_explanations(
     top_k: int,
     out_dir: str | Path | None,
     save_plots: bool,
+    polarity: torch.Tensor | None = None,
 ) -> dict[str, dict[str, Any]]:
     """为每个视频生成 template-based 解释（回答"为什么异常"）。
 
     原理：per-prompt 相似度 anomaly_sims[k] 越高 → 该 clip 画面越符合
-    prompt 描述的语义。取相似度最高的**异常类** prompt 作为"异常原因"。
+    prompt 描述的语义。解释**只从异常极性（+1）的 prompt 中选 top-k**，
+    避免用 "a peaceful plaza scene" 这类正常 prompt 解释异常。
+
+    Args:
+        polarity: ``(K,)`` prompt 极性 {+1 异常, -1 正常, 0 中性}。
+                  None 时退回"全部 prompt 排序"（旧行为）。
 
     Returns:
-        {video_id: {"top_abnormal_prompts": [...], "explanation": str, ...}}
+        {video_id: {"top_prompts": [...], "explanation": str, ...}}
     """
+    pol = polarity.cpu().numpy() if polarity is not None else None
+    # 允许参与解释的 prompt 下标：优先只用异常极性；没有则退回全部
+    if pol is not None and (pol == 1).any():
+        allowed = np.nonzero(pol == 1)[0]
+    else:
+        allowed = np.arange(len(prompts_with_types))
+
     result: dict[str, dict[str, Any]] = {}
     for vid, clip in worst_clips.items():
         sims = clip["anomaly_sims"]
@@ -249,11 +278,12 @@ def _build_explanations(
         if sims is None:
             continue
 
-        # 相似度降序 → 最匹配的 prompt 排最前
-        order = np.argsort(sims)[::-1]
+        # 仅在异常 prompt 内按相似度降序 → 最匹配的异常语义排最前
+        order = allowed[np.argsort(sims[allowed])[::-1]]
         top = [{
             "prompt": prompts_with_types[i][1],
             "type": prompts_with_types[i][0],
+            "polarity": int(pol[i]) if pol is not None else 0,
             "similarity": round(float(sims[i]), 4),
         } for i in order[:top_k]]
 
@@ -281,8 +311,9 @@ def _build_explanations(
                 )
                 plot_prompt_scores(
                     sims, [p for _, p in prompts_with_types],
-                    title=f"{vid} prompt similarity",
+                    title=f"{vid} prompt similarity (abnormal-centered)",
                     save_path=plot_dir / f"{vid}_prompts.png",
+                    polarity=pol,
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("Plot failed for %s: %s", vid, e)

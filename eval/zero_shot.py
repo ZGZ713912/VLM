@@ -322,6 +322,8 @@ def _build_explanations(
 ) -> dict[str, dict[str, Any]]:
     """生成 template-based 解释——回答"为什么这个视频是异常的"。"""
     pol = polarity.cpu().numpy()
+    # 解释只从异常极性 prompt 中选，避免用正常 prompt 解释异常
+    allowed = np.nonzero(pol == 1)[0] if (pol == 1).any() else np.arange(len(prompts))
     result: dict[str, dict[str, Any]] = {}
 
     for vid, clip in worst.items():
@@ -329,7 +331,7 @@ def _build_explanations(
         if sims is None:
             continue
 
-        order = np.argsort(sims)[::-1]
+        order = allowed[np.argsort(sims[allowed])[::-1]]
         top = [{
             "prompt": prompts[i],
             "polarity": int(pol[i]),
@@ -366,8 +368,9 @@ def _build_explanations(
                 )
                 plot_prompt_scores(
                     sims, prompts,
-                    title=f"{vid} zero-shot prompt similarity",
+                    title=f"{vid} zero-shot prompt similarity (abnormal-centered)",
                     save_path=plot_dir / f"{vid}_prompts.png",
+                    polarity=pol,
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("Plot failed for %s: %s", vid, e)

@@ -78,6 +78,7 @@ def main() -> None:
         top_k=int(cfg.eval.top_k_prompts),
         out_dir=dirs["result"] / str(cfg.paths.run_name),
         save_plots=bool(cfg.eval.save_plots),
+        cfg=cfg,
     )
     log.info("Done. frame_auc=%.4f clip_auc=%.4f video_auc=%.4f",
              results["metrics"].get("frame_auc", 0.0),

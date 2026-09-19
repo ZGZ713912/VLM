@@ -32,34 +32,242 @@ docker compose up -d
 docker compose exec vlm-dev zsh
 ```
 
-## 训练 / 评估（一条命令闭环）
+## 异常视频检测完整流程
+
+本节描述从原始视频到「异常分数 + 可解释性报告」的完整链路。所有命令都在容器内、
+项目根目录执行。建议按阶段 0 → 6 顺序操作。
+
+### 数据流总览
+
+```
+Avenue 视频 (B,T,C,H,W) ──┐
+                          │  CLIPBackbone.encode_video
+                          ▼
+              视觉特征 vis_feat (B,T,D)          prompt 文本 (K,)
+                          │                        │ CLIPBackbone.encode_text
+                          │                        ▼
+                          │              文本 token 特征 (K,L,D)
+                          ▼                        │
+                 SemanticAlignment（对齐到共享维度 D_a）
+                          │                        │
+                          └────────┬───────────────┘
+                                   ▼
+        Fusion（concat / gated / crossattn）与文本上下文融合 (B,T,D_f)
+                                   ▼
+        Temporal（identity / transformer）时序建模 (B,T,D_f)
+                                   ▼
+        AnomalyHead ──► frame_logits (B,T) / frame_score (B,T) / clip_score (B)
+                                   ▼
+     滑窗遍历全部 clip → 按帧坐标等权平均 → 稠密逐帧分数 (N,)
+                                   ▼
+     Frame / Clip / Video 三级 AUC & AP
+                                   ▼
+     Matcher(embedding, text) → top-k prompt → template 解释 + 热力图
+```
+
+关键设计：
+- **训练用 16 帧 clip，评估用滑窗覆盖整段视频**，得到真正逐帧的 `(N,)` 异常曲线，
+  而不是每个 clip 一个标量（见 `eval/inference.py`）。
+- **可训练模块只有 alignment / fusion / temporal / head**；CLIP backbone 默认冻结，
+  因此支持「先离线提特征、再快速迭代」。
+- **Prompt 是配置项而非硬编码**：模型内部通过 `PromptProcessor` 读取
+  `configs/prompts.yaml`，训练与推理使用同一套 prompt 集合。
+
+---
+
+### 阶段 0 · 环境准备
 
 ```bash
-# 训练 + 视频级评估（自动保存 checkpoint / 指标 / 解释 / 可视化图）
+cp .env.example .env          # 首次
+docker compose build          # 首次约 5-10 分钟
+docker compose up -d
+docker compose exec vlm-dev zsh
+```
+
+GPU 主机使用 `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`；
+CPU 主机把 `.env` 的 `BASE_IMAGE` 切到 `pytorch/pytorch:2.3.1-cpu` 后重建。
+
+### 阶段 1 · 数据与标注
+
+1. 按「[数据集](#数据集)」一节把 CUHK Avenue 放入 `data/Avenue_Dataset/`。
+2. 确认标注模式（**重要**，见下方 ⚠️ 说明）：
+   - 持有**官方二值 mask** → `configs/experiment.yaml` 设 `data.frame_label_mode: pixel`；
+   - 使用本仓库自带降采样灰度 `vol` → 设 `data.frame_label_mode: motion_diff`。
+
+`motion_diff` 模式需要先生成运动伪标签（一次性，训练/评估会自动从
+`data/labels/{split}/` 读取）：
+
+```bash
+python tools/extract_motion_labels.py --root ./data --split training --out ./data/labels --threshold 3.0
+python tools/extract_motion_labels.py --root ./data --split testing  --out ./data/labels --threshold 3.0
+```
+
+### 阶段 2 · Zero-shot baseline（无需训练，秒级）
+
+在训练前先建立可信的无训练基线：冻结 CLIP，直接比较「异常 prompt 组平均相似度 −
+正常 prompt 组平均相似度」作为逐帧异常分数
+（`s_t = mean_{k∈A} cos(v_t,t_k) − mean_{k∈N} cos(v_t,t_k)`）。
+
+```bash
+# 单次 zero-shot（--prompts: label | scene | contrast | all）
+python scripts/zero_shot_test.py --config configs/experiment.yaml \
+    --prompts scene --output results/zero_shot_test.json
+
+# 多 prompt 批量消融（一次跑多组，输出 json + markdown 表）
+python scripts/prompt_comparison.py --config configs/experiment.yaml \
+    --experiments label_only scene_only contrast_only all_types
+```
+
+产物：`results/zero_shot_test.json`、`results/prompt_comparison.{json,md}`，
+以及每个实验目录下的 `zero_shot_metrics.json` / `zero_shot_explanations.json` / 热力图。
+
+> 该路径完全跳过 `VLMModel`，与微调结果使用**相同的滑窗聚合与三级指标**，
+> 因此两者可直接对比。`eval.zero_shot` 还返回 AGENTS.md §4 要求的
+> `anomaly_score / frame_score / embedding / explanation` 契约。
+
+### 阶段 3 · 离线特征提取（可选，冻结 backbone 时提速 ~10×）
+
+backbone 冻结时，视觉特征与输入无关的部分可预先算好，训练时直接读 `.pt`：
+
+```bash
+python tools/extract_video_features.py --root ./data --split training \
+    --model ViT-B-32 --pretrained laion2b_s34b_b79k \
+    --out ./data/features/training --batch-size 64
+
+python tools/extract_video_features.py --root ./data --split testing \
+    --out ./data/features/testing --batch-size 64
+
+# （可选）预编码 prompt 文本特征
+python tools/extract_text_features.py --config configs/prompts.yaml \
+    --out ./data/features/text/prompts.pt
+```
+
+提取完成后无需改代码：`datasets/builders.py` 检测到 `data/features/{split}/`
+存在就会自动走 `FeatureDataset`（也可显式设 `data.use_feature: true`）。
+此时 batch 中的 key 由 `video` 变为 `vis_feat`，Trainer/推理会自动选择
+`model.forward_from_visual()` 路径。
+
+### 阶段 4 · 训练
+
+```bash
+# 训练 + 自动视频级评估（一条命令闭环）
 python train.py --config configs/experiment.yaml
 
-# 只评估已训练好的 checkpoint
-python eval.py --config configs/experiment.yaml --ckpt ./checkpoints/exp01/best.pt
+# 冒烟测试（只跑 1 个 epoch，验证链路）
+python train.py --config configs/experiment.yaml --epochs 1 --run-name smoke
 
-# 续训
-python train.py --config configs/experiment.yaml --resume ./checkpoints/exp01/last.pt
+# 续训（模型/优化器/调度器/epoch 全量恢复）
+python train.py --config configs/experiment.yaml \
+    --resume ./checkpoints/exp01/last.pt
 ```
 
-**快速迭代路径**（backbone 冻结时推荐，训练提速 ~10×）：
+每个 batch 的闭环为：`forward → VLMVADLoss(BCE + 对比对齐) → backward →
+grad_clip → optimizer.step → scheduler.step → 日志`（见 `train/trainer.py`）。
+`train.py` 在训练结束后自动加载 `best.pt`，对测试集执行 `evaluate_videos()`。
+
+损失函数（`train/losses.py`）：
+- **BCE**：逐帧异常分类，权重 `train.loss.w_bce`；
+- **对比对齐**：视觉 embedding 与 prompt 文本的跨模态对比学习，权重
+  `train.loss.w_contrastive`；两者共同决定最终 `loss`。
+
+### 阶段 5 · 评估与可解释性
 
 ```bash
-# 1. 离线提取所有视频帧的 CLIP 特征（一次性）
-python tools/extract_video_features.py --root ./data --split training --out ./data/features/training
-python tools/extract_video_features.py --root ./data --split testing  --out ./data/features/testing
+# 只评估已有 checkpoint（不重新训练）
+python eval.py --config configs/experiment.yaml \
+    --ckpt ./checkpoints/exp01/best.pt
 
-# 2. 提取运动伪标签（frame_label_mode=motion_diff 时需要）
-python tools/extract_motion_labels.py --root ./data --split testing --out ./data/labels
-
-# 3. 在 config 里设置 use_feature: true 即可自动走 FeatureDataset
+# 在训练集上评估（可选）
+python eval.py --config configs/experiment.yaml \
+    --ckpt ./checkpoints/exp01/best.pt --eval-split training
 ```
 
-> 实验对比（prompt ablation / fusion 对比 / backbone 互换）**全部改 yaml 即可**，无需改代码：
-> 见 `configs/prompts.yaml`（prompt 词汇表）与 `configs/experiment.yaml`（`model.fusion.type` / `model.backbone.name`）。
+评估输出到 `results/{run_name}/`：
+
+| 文件 | 内容 |
+|---|---|
+| `metrics.json` | 全局 Frame/Clip/Video AUC & AP + 每视频逐帧指标 |
+| `explanations.json` | 每个视频最异常 clip 的 top-k prompt、异常帧排名、自然语言解释 |
+| `plots/{id}_heatmap.png` | 时序异常热力图（帧分数曲线 + GT 色带） |
+| `plots/{id}_prompts.png` | 该 clip 对每个 prompt 的相似度条形图 |
+| `config.yaml` | 本次运行的完整配置快照（可复现性，AGENTS.md §7） |
+
+解释文本回答「为什么这个视频是异常的」：取相似度最高的异常 prompt 作为原因，
+例如 **“该视频段（起始帧 512）被判定为异常，因为画面语义与 `a person fighting`
+(sim=0.31) 最接近……”**。底层模型输出的张量契约见 `models/outputs.py`：
+`frame_score (B,T)`、`clip_score (B,)`、`embedding (B,D_f)`；zero-shot 路径
+（`eval/zero_shot.py`）额外按 AGENTS.md §4 汇总 `anomaly_score` / `frame_score` /
+`embedding` / `explanation` 四个字段。
+
+### 阶段 5b · 可视化演示（把检测效果变成能直接看的 MP4）
+
+上面的 `plots/*.png` 是静态曲线，不利于直观展示。用 `scripts/visualize_demo.py`
+可以把**真实画面 + 异常高亮 + 完整时间轴**渲染成可直接播放的 H.264 MP4：
+
+```bash
+python scripts/visualize_demo.py --config configs/experiment.yaml \
+    --ckpt checkpoints/exp01/best.pt --videos 01 06 18 --out results/demo
+```
+
+| 产物（`results/demo/`） | 内容 |
+|---|---|
+| `{id}_demo.mp4` | 1280×720 动画：画面 + 异常帧红框 + 分数条 + 右侧 top 异常 prompt + 底部整段分数时间轴（GT 红带 + 播放头 + 阈值线） |
+| `{id}_demo.gif` | 最异常片段短动图（可直接贴 PPT） |
+| `{id}_top_frames.png` | 最异常 K 帧缩略图网格（带帧号/分数/GT） |
+| `timeline_{id}.png` | **整段视频**逐帧分数曲线 + GT 色带 + 阈值线 |
+| `index.md` | 汇总表 + 中文解释 + 文件链接（一个入口看全部） |
+
+说明：
+- 逐帧分数直接复用 `eval.inference.evaluate_videos`（不重复实现推理），
+  所以 MP4 与 `metrics.json` 中的数字完全一致。
+- 红框阈值默认取该视频 frame score 的 **90 分位**（展示用相对阈值，非模型校准决策边界），
+  可用 `--threshold 0.5` 覆盖。
+- 视频上文字为英文（容器内无中文字体），中文解释写入 `index.md`。
+- 解释现在**只从异常极性 prompt 中选 top-k**（`polarity=+1`），不会再出现
+  “用 `a peaceful plaza scene` 解释异常”的问题。
+
+### 阶段 6 · 实验对比（Prompt / Fusion / Backbone）
+
+全部**改 yaml 即可**，无需改代码：
+
+| 实验维度 | 改动位置 | 可选值 |
+|---|---|---|
+| Prompt 类型消融 | `configs/prompts.yaml: experiments` + `scripts/prompt_comparison.py` | label / scene / contrast / 组合 |
+| Prompt 词表 | `configs/prompts.yaml: expansions` | 任意词汇（保持正常/异常词互斥） |
+| Fusion 对比 | `configs/experiment.yaml: model.fusion.type` | `concat` / `gated` / `crossattn` |
+| Backbone 互换 | `model.backbone.name` + `pretrained` | 任意 open_clip 模型（如 ViT-L-14） |
+| 时序建模 | `model.temporal.type` | `identity` / `transformer` |
+| 文本池化 | `eval.text_pool` | `mean`（与训练一致）/ `eos`（CLIP 官方） |
+
+```bash
+# 对比 concat vs cross-attn：分别改 yaml 的 model.fusion.type，各自跑一遍
+python train.py --config configs/experiment.yaml --run-name fusion_concat
+# 修改为 crossattn 后
+python train.py --config configs/experiment.yaml --run-name fusion_crossattn
+```
+
+`scripts/prompt_comparison.py` 会把多组 prompt 实验汇总成 markdown 表，当前仓库
+示例（zero-shot, frozen CLIP, Avenue testing）：
+
+| experiment | #prompts | Frame AUC | Video AUC |
+|---|---|---|---|
+| label_only | 14 | 0.4226 | 0.8000 |
+| scene_only | 9 | 0.5111 | 0.9000 |
+| contrast_only | 8 | 0.3443 | 0.9000 |
+| all_types | 31 | 0.4338 | 0.9000 |
+
+### 产物目录与复现性
+
+```
+checkpoints/{run_name}/best.pt   # 选优指标 = 验证集 clip_auc
+checkpoints/{run_name}/last.pt   # 最新 epoch（续训用）
+logs/{run_name}/                 # TensorBoard events
+results/{run_name}/              # metrics / explanations / plots / config.yaml
+```
+
+固定随机性由 `utils/reproducibility.set_seed(seed)` 统一完成（Python / NumPy /
+PyTorch / dataloader shuffle），seed 来自 `configs/experiment.yaml: seed`。
+每次运行都会把最终配置写入 `results/{run_name}/config.yaml`，保证实验可追溯。
 
 ### ⚠️ 关于 Avenue 数据集标注（重要）
 
@@ -159,7 +367,11 @@ vlm_ws/
 ├── requirements/            # Python 依赖
 │   ├── base.txt             # 核心依赖
 │   └── dev.txt              # 开发依赖（Jupyter、pytest 等）
-├── scripts/docker/          # 容器入口脚本与 shell 模版
+├── scripts/
+│   ├── zero_shot_test.py    # zero-shot 基线入口
+│   ├── prompt_comparison.py # prompt 消融实验
+│   ├── visualize_demo.py    # 检测效果 → MP4/GIF 可视化演示
+│   └── docker/              # 容器入口脚本与 shell 模版
 ├── Dockerfile               # 镜像构建文件
 ├── docker-compose.yml       # 开发容器编排
 ├── docker-compose.gpu.yml   # GPU 覆盖配置

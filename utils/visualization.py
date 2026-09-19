@@ -40,16 +40,19 @@ def plot_temporal_heatmap(
     frame_labels: Tensor | np.ndarray | None = None,
     title: str = "Frame-level anomaly scores",
     save_path: str | Path | None = None,
+    threshold: float | None = None,
 ) -> None:
     """绘制帧级异常分数曲线（可叠加上 GT 标签作为背景色带）。
 
     用途：回答"这个视频里哪些帧是异常的？"——异常帧分数显著抬升。
+    传入整段视频的 ``(T,)`` 分数即可得到完整时间轴（不再是单个 clip）。
 
     Args:
         frame_scores: ``(T,)`` 帧级异常分数 [0, 1]。
         frame_labels: ``(T,)`` 可选——GT 标签，用于把异常区间涂成红色背景。
         title: 图标题。
         save_path: 保存路径；None 则显示。
+        threshold: 可选——判定异常的水平线（虚线）。
     """
     scores = (
         frame_scores.cpu().numpy() if isinstance(frame_scores, Tensor)
@@ -70,6 +73,12 @@ def plot_temporal_heatmap(
         )
 
     ax.plot(np.arange(len(scores)), scores, color="tab:blue", linewidth=1.2)
+    if threshold is not None:
+        ax.axhline(
+            float(threshold), color="tab:red", linestyle="--", linewidth=1.0,
+            label=f"threshold={threshold:.2f}",
+        )
+        ax.legend(loc="upper right", fontsize=8)
     ax.set_xlabel("Frame index")
     ax.set_ylabel("Anomaly score")
     ax.set_ylim(-0.05, 1.05)
@@ -83,17 +92,26 @@ def plot_prompt_scores(
     prompts: list[str],
     title: str = "Clip-to-prompt similarity",
     save_path: str | Path | None = None,
+    polarity: np.ndarray | None = None,
+    center: bool = True,
 ) -> list[int]:
     """绘制一个 clip 与 K 个 prompt 的相似度横向条形图。
 
     用途：回答"这个视频为什么异常？"——相似度最高的 prompt 就是这个 clip
     最符合的语义描述（异常类型定位）。
 
+    为什么需要 center：CLIP 余弦相似度普遍被压缩在 0 附近，直接画条
+    所有条看起来一样长。默认画 ``sim - mean(sim)``（相对平均的偏差），
+    差异立刻可见；正值表示"比平均更像该 prompt"。
+
     Args:
         similarity: ``(K,)`` 该 clip 与每个 prompt 的相似度。
         prompts: K 个 prompt 文本。
         title: 图标题。
         save_path: 保存路径。
+        polarity: 可选 ``(K,)`` —— {+1 异常, -1 正常, 0 中性}，
+            用于把异常 prompt 标红、正常标绿，一眼看出极性。
+        center: 是否按均值中心化（默认 True）。
 
     Returns:
         按相似度从高到低排序的 prompt 下标列表（供解释文本复用）。
@@ -103,18 +121,25 @@ def plot_prompt_scores(
         else np.asarray(similarity)
     )
     order = np.argsort(sim)[::-1]  # 降序：最匹配的在前
+    values = sim - sim.mean() if center else sim
 
     fig, ax = plt.subplots(figsize=(8, max(2.5, 0.35 * len(prompts))))
-    # 颜色：值越高越接近红色（异常语义强度）
-    colors = plt.cm.viridis((sim[order] - sim[order].min()) /
-                            (sim[order].max() - sim[order].min() + 1e-8))
-    ax.barh(range(len(order)), sim[order], color=colors)
+    if polarity is not None:
+        # 极性着色：异常=红，正常=绿，中性=灰
+        color_map = {1: "tab:red", -1: "tab:green", 0: "tab:gray"}
+        colors = [color_map.get(int(polarity[i]), "tab:gray") for i in order]
+    else:
+        colors = plt.cm.viridis(
+            (sim[order] - sim[order].min()) /
+            (sim[order].max() - sim[order].min() + 1e-8)
+        )
+    ax.barh(range(len(order)), values[order], color=colors)
+    ax.axvline(0.0, color="black", linewidth=0.8)
     ax.set_yticks(range(len(order)))
     ax.set_yticklabels([prompts[i] for i in order], fontsize=8)
     ax.invert_yaxis()  # 最高的显示在最上面
-    ax.set_xlabel("Similarity")
+    ax.set_xlabel("Similarity (centered)" if center else "Similarity")
     ax.set_title(title)
-    ax.set_xlim(-1.05, 1.05)
 
     _save_or_show(fig, save_path)
     return [int(i) for i in order]
