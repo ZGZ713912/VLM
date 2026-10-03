@@ -92,7 +92,7 @@ CPU 主机把 `.env` 的 `BASE_IMAGE` 切到 `pytorch/pytorch:2.3.1-cpu` 后重�
 1. 按「[数据集](#数据集)」一节把 CUHK Avenue 放入 `data/Avenue_Dataset/`。
 2. 确认标注模式（**重要**，见下方 ⚠️ 说明）：
    - 持有**官方二值 mask** → `configs/experiment.yaml` 设 `data.frame_label_mode: pixel`；
-   - 使用本仓库自带降采样灰度 `vol` → 设 `data.frame_label_mode: motion_diff`。
+   - 使用本仓库自带降采样灰度 `vol` → 保持默认 `data.frame_label_mode: motion_diff`。
 
 `motion_diff` 模式需要先生成运动伪标签（一次性，训练/评估会自动从
 `data/labels/{split}/` 读取）：
@@ -274,9 +274,10 @@ PyTorch / dataloader shuffle），seed 来自 `configs/experiment.yaml: seed`。
 本仓库 `data/Avenue_Dataset/*_vol/*.mat` 中的 `vol` 变量经检测**实际是降采样的灰度视频帧，
 而不是二值异常 mask**（与视频帧相关系数 ≈ 0.999）。因此：
 
-- 若你持有**官方二值 mask**：保持 `frame_label_mode: pixel`（默认），即可直接训练/评估。
-- 若使用本仓库自带数据：请把配置改为 `frame_label_mode: motion_diff`（基于帧间差的运动伪标签，
-  VAD 经典 baseline 之一，仅用于跑通流程，**学术结论请使用真实 mask**）。
+- **本仓库默认** `frame_label_mode: motion_diff`（`configs/experiment.yaml`）：基于帧间差的
+  运动伪标签，VAD 经典 baseline 之一，配合自带数据即可跑通流程，**学术结论请使用真实 mask**。
+- 若你持有**官方二值 mask**：把 `configs/experiment.yaml` 改为 `frame_label_mode: pixel`
+  后再训练/评估，无需其他改动。
 - 代码会自动检测可疑 mask 并在日志里提醒（`datasets/video_dataset.py: mask_looks_like_frames`）。
 
 ### GPU 主机
@@ -365,13 +366,17 @@ vlm_ws/
 ├── logs/                    # TensorBoard 日志（运行时生成）
 ├── results/                 # 实验结果（运行时生成）
 ├── requirements/            # Python 依赖
-│   ├── base.txt             # 核心依赖
-│   └── dev.txt              # 开发依赖（Jupyter、pytest 等）
+│   ├── base.txt             # 核心依赖（含标注工具 flask）
+│   ├── dev.txt              # 开发依赖（Jupyter、pytest 等）
+│   └── ci.txt               # CI 依赖（base + pytest，不含 Jupyter）
 ├── scripts/
 │   ├── zero_shot_test.py    # zero-shot 基线入口
 │   ├── prompt_comparison.py # prompt 消融实验
 │   ├── visualize_demo.py    # 检测效果 → MP4/GIF 可视化演示
 │   └── docker/              # 容器入口脚本与 shell 模版
+├── tests/                   # 冒烟测试（配置 / 极性 / 指标 / forward / loss）
+├── pytest.ini               # pytest 配置（pythonpath = 项目根）
+├── .github/workflows/ci.yml # CI：push / PR 自动跑 pytest
 ├── Dockerfile               # 镜像构建文件
 ├── docker-compose.yml       # 开发容器编排
 ├── docker-compose.gpu.yml   # GPU 覆盖配置
@@ -380,6 +385,28 @@ vlm_ws/
 ├── docs/container.md        # 容器环境详细文档
 └── AGENTS.md                # AI Agent 编码规范
 ```
+
+## 测试
+
+最小冒烟测试不需要数据集、不下载 CLIP 权重，CPU 上数秒跑完：
+
+```bash
+pytest -q
+```
+
+覆盖点（`tests/test_smoke.py`）：
+
+| 测试 | 验证内容 |
+|---|---|
+| `test_load_experiment_config*` | experiment.yaml + prompts.yaml 合并、配置快照落盘 |
+| `test_prompt_polarity` | prompt → {+1 异常, -1 正常} 极性映射正确 |
+| `test_*_metrics` | Frame/Clip/Video AUC & AP 数值与单类防御 |
+| `test_model_forward*_shapes` | `ModelOutput` 契约：`frame_score (B,T)` / `clip_score (B,)` / `embedding (B,D_f)` |
+| `test_vlmvad_loss_backward` | BCE + 对比对齐 loss 有限且可反向传播 |
+
+模型 forward 用 `FakeCLIPBackbone` 替身（接口/形状与 `CLIPBackbone` 一致），
+因此 CI 无需下载预训练权重。GitHub Actions 见 `.github/workflows/ci.yml`
+（push / PR 自动执行 `pytest -q`）。
 
 ## 容器内开发
 
