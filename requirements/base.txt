@@ -18,3 +18,5 @@ open_clip_torch==2.26.1
 ftfy==6.2.0
 sentencepiece==0.2.0
 av==12.1.0
+# tools/annotation_tool (Flask web UI)
+flask==3.0.3

@@ -16,9 +16,17 @@
 ## 安装和运行
 
 ### 1. 安装依赖
+
+Flask 已包含在项目依赖中，在**仓库根目录**安装即可：
+
 ```bash
-pip install -r requirements.txt
+# 仓库根目录（vlm_ws/）
+pip install -r requirements/base.txt   # 完整环境
+# 或只装标注工具所需依赖
+pip install flask==3.0.3
 ```
+
+Docker 环境（`docker compose up -d` 构建的镜像）已预装，无需额外安装。
 
 ### 2. 启动服务器
 ```bash
