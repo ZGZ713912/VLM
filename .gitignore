@@ -62,6 +62,10 @@ ehthumbs.db
 # ── Editors / IDEs ──────────────────────────────────────────
 .idea/
 *.swp
+
+# ── Node（本仓库为 Python 项目；防止工具误生成 lockfile）────────
+package-lock.json
+node_modules/
 *.swo
 *~
 .vscode/
