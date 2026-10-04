@@ -73,6 +73,7 @@ class FeatureDataset(Dataset[dict[str, Any]]):
         preload: bool = True,
         allow_missing: bool = False,
         label_dir: str | Path | None = None,
+        frame_label_mode: str = "pixel",
     ) -> None:
         """初始化 FeatureDataset。
 
@@ -95,6 +96,14 @@ class FeatureDataset(Dataset[dict[str, Any]]):
             raise ValueError("clip_length must be positive")
         if clip_stride <= 0:
             raise ValueError("clip_stride must be positive")
+        if clip_step is not None and clip_step <= 0:
+            raise ValueError("clip_step must be positive")
+        if frame_label_mode not in {"pixel", "motion_diff", "official"}:
+            raise ValueError(f"Unknown frame_label_mode: {frame_label_mode}")
+        if frame_label_mode in {"motion_diff", "official"} and label_dir is None:
+            raise ValueError(f"{frame_label_mode} feature data requires label_dir")
+        if frame_label_mode == "official" and allow_missing:
+            raise ValueError("Official evaluation requires all videos; allow_missing must be false")
 
         self.root = _resolve_avenue_root(root)
         self.split = _normalize_split(split)
@@ -107,6 +116,8 @@ class FeatureDataset(Dataset[dict[str, Any]]):
         self.preload = preload
         self.allow_missing = allow_missing
         self.label_dir = Path(label_dir) if label_dir is not None else None
+        self.frame_label_mode = frame_label_mode
+        self._labels: dict[str, torch.Tensor] = {}
 
         # 构建与 VideoDataset 完全相同的视频索引和 clip 索引
         self.video_records = self._build_video_records()
@@ -134,6 +145,10 @@ class FeatureDataset(Dataset[dict[str, Any]]):
     # ── Build indices (mirrors VideoDataset) ──────────────────
 
     def _build_video_records(self) -> list[VideoRecord]:
+        if self.frame_label_mode == "official":
+            from .labels import official_video_records
+            records, self.label_provenance = official_video_records(self.root, self.split, self.label_dir)
+            return records
         from .video_dataset import _read_video_metadata, _read_mask_metadata
 
         video_dir = self.root / f"{self.split}_videos"
@@ -195,6 +210,8 @@ class FeatureDataset(Dataset[dict[str, Any]]):
         """确保每个视频的特征帧数 == 视频真实帧数。"""
         for vr in self.video_records:
             feat = self._resolve_feature(vr.video_id)
+            if not isinstance(feat, torch.Tensor) or feat.ndim != 2 or not torch.isfinite(feat).all():
+                raise ValueError(f"Expected finite (N,D) features for {vr.video_id}")
             if feat.shape[0] != vr.num_frames:
                 raise RuntimeError(
                     f"Feature frame count mismatch for {vr.video_id}: "
@@ -242,14 +259,17 @@ class FeatureDataset(Dataset[dict[str, Any]]):
         vis_feat = feat[indices]   # (T, D) — 直接就是 CLIP 编码后的特征
 
         # 标注 —— 优先用预计算标签文件，否则用像素 mask
-        if self.label_dir is not None:
+        if self.frame_label_mode in {"motion_diff", "official"}:
             label_path = self.label_dir / f"{vr.video_id}.pt"
             if not label_path.is_file():
                 raise FileNotFoundError(
                     f"Label file not found: {label_path}. "
-                    f"Run tools/extract_motion_labels.py first."
+                    f"Prepare the configured {self.frame_label_mode} labels first."
                 )
-            labels = torch.load(label_path, map_location="cpu", weights_only=True)
+            from .labels import load_frame_labels
+            if vr.video_id not in self._labels:
+                self._labels[vr.video_id] = load_frame_labels(label_path, vr.num_frames)
+            labels = self._labels[vr.video_id]
             frame_label = labels[indices].to(torch.long)
             clip_masks = frame_label.unsqueeze(1).float()  # (T, 1) 占位
         else:
@@ -264,4 +284,5 @@ class FeatureDataset(Dataset[dict[str, Any]]):
             "clip_label": frame_label.amax(),    # scalar
             "video_id": vr.video_id,
             "start_frame": clip.start_frame,
+            "frame_indices": torch.from_numpy(indices.copy()),
         }

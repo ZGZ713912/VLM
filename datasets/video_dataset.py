@@ -18,7 +18,7 @@ from torch.utils.data import Dataset
 
 VideoBackend = Literal["auto", "decord", "opencv"]
 Split = Literal["training", "testing"]
-FrameLabelMode = Literal["pixel", "motion_diff"]
+FrameLabelMode = Literal["pixel", "motion_diff", "official"]
 
 # 已提醒过的"可疑 mask"视频 id（避免每个 clip 都刷一次 warning）
 _WARNED_SUSPECT_MASKS: set[str] = set()
@@ -124,6 +124,10 @@ def _load_mask_volume(mask_path: str) -> np.ndarray:
             mask_path,
         )
 
+    if mask_looks_like_frames(volume):
+        raise ValueError(f"Pixel annotation {mask_path} contains grayscale frames, not masks. "
+                         "Use motion_diff for pipeline validation or supply real binary masks.")
+
     binary = (volume > 0).astype(np.float32)
     return np.transpose(binary, (2, 0, 1))  # (H, W, T) → (T, H, W)
 
@@ -161,6 +165,8 @@ def _compute_motion_labels(frames: np.ndarray, threshold: float) -> np.ndarray:
     pixel mask（frame_label_mode="pixel"）。
     """
     gray = frames.mean(axis=-1).astype(np.float32)          # (T, H, W) in [0,255]
+    if len(gray) < 2:
+        return np.zeros(len(gray), dtype=np.int64)
     diff = np.abs(np.diff(gray, axis=0)).mean(axis=(1, 2))  # (T-1,)
     motion = np.concatenate([[diff[0]], diff])              # (T,)
     return (motion > threshold).astype(np.int64)
@@ -255,6 +261,7 @@ class VideoDataset(Dataset[dict[str, Any]]):
         pad_short_clips: bool = False,
         frame_label_mode: FrameLabelMode = "pixel",
         motion_threshold: float = 3.0,
+        label_dir: str | Path | None = None,
     ) -> None:
         if clip_length <= 0:
             raise ValueError("clip_length must be positive")
@@ -268,10 +275,10 @@ class VideoDataset(Dataset[dict[str, Any]]):
             raise ValueError("image_size must be a (height, width) tuple")
         if video_backend not in {"auto", "decord", "opencv"}:
             raise ValueError(f"Unsupported video_backend: {video_backend!r}")
-        if frame_label_mode not in {"pixel", "motion_diff"}:
+        if frame_label_mode not in {"pixel", "motion_diff", "official"}:
             raise ValueError(
                 f"Unsupported frame_label_mode: {frame_label_mode!r} "
-                "(expected 'pixel' or 'motion_diff')"
+                "(expected 'pixel', 'motion_diff' or 'official')"
             )
 
         self.root = _resolve_avenue_root(root)
@@ -286,6 +293,8 @@ class VideoDataset(Dataset[dict[str, Any]]):
         self.pad_short_clips = pad_short_clips
         self.frame_label_mode = frame_label_mode
         self.motion_threshold = motion_threshold
+        self.label_dir = Path(label_dir) if label_dir is not None else None
+        self._labels: dict[str, torch.Tensor] = {}
 
         self.video_records = self._build_video_records()
         self.clip_records = self._build_clip_records()
@@ -299,6 +308,10 @@ class VideoDataset(Dataset[dict[str, Any]]):
     # ── Build indices ─────────────────────────────────────────
 
     def _build_video_records(self) -> list[VideoRecord]:
+        if self.frame_label_mode == "official":
+            from .labels import official_video_records
+            records, self.label_provenance = official_video_records(self.root, self.split, self.label_dir)
+            return records
         video_dir = self.root / f"{self.split}_videos"
         mask_dir = self.root / f"{self.split}_vol"
         video_paths = sorted(video_dir.glob("*.avi"))
@@ -367,19 +380,29 @@ class VideoDataset(Dataset[dict[str, Any]]):
             video = F.interpolate(video, size=self.image_size,
                                   mode="bilinear", align_corners=False)
 
-        mask_vol = _load_mask_volume(str(vr.mask_path))                # (T_m, H, W)
         if self.frame_label_mode == "pixel":
-            # 可疑 mask（实为视频帧）的提醒已在 _load_mask_volume 内完成
+            mask_vol = _load_mask_volume(str(vr.mask_path))
             clip_masks = torch.from_numpy(mask_vol[indices].copy()).to(torch.float32)
             frame_label = (clip_masks.flatten(1).amax(dim=1) > 0).to(torch.long)
-        else:  # motion_diff —— 基于帧间差的运动伪标签
-            frame_label = torch.from_numpy(
-                _compute_motion_labels(raw, self.motion_threshold)
-            )
+        else:  # Explicit cached official labels, or motion pseudo labels.
+            if self.label_dir is not None:
+                from .labels import load_frame_labels
+                if vr.video_id not in self._labels:
+                    self._labels[vr.video_id] = load_frame_labels(
+                        self.label_dir / f"{vr.video_id}.pt", vr.num_frames)
+                frame_label = self._labels[vr.video_id][indices]
+            else:
+                # Compute relative to each original predecessor, independent of clip boundaries/stride.
+                previous = np.maximum(indices - 1, 0)
+                previous[indices == 0] = min(1, vr.num_frames - 1)
+                prior = self._read_video_frames(vr.video_path, previous)
+                motion = np.abs(raw.mean(-1).astype(np.float32)
+                                - prior.mean(-1).astype(np.float32)).mean((1, 2))
+                frame_label = torch.from_numpy((motion > self.motion_threshold).astype(np.int64))
             # 无像素级标注：pixel_mask 退化为帧标签占位，保持返回 dict 结构一致
             clip_masks = frame_label.unsqueeze(1).float()  # (T, 1)
 
-        if self.resize_mask_to_video and self.image_size is not None:
+        if self.resize_mask_to_video and self.image_size is not None and self.frame_label_mode == "pixel":
             clip_masks = F.interpolate(
                 clip_masks.unsqueeze(1), size=self.image_size, mode="nearest",
             ).squeeze(1)
@@ -391,4 +414,5 @@ class VideoDataset(Dataset[dict[str, Any]]):
             "clip_label": frame_label.amax(),    # scalar
             "video_id": vr.video_id,
             "start_frame": clip.start_frame,
+            "frame_indices": torch.from_numpy(indices.copy()),
         }

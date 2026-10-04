@@ -1,3 +1,4 @@
+# Evaluation only. Do not use testing ground truth to train or select a model.
 # VLM-VAD experiment config
 # ------------------------------------------------------------------
 # This file is the single source of truth for training/eval/zero-shot.
@@ -12,7 +13,7 @@
 seed: 42
 device: "auto"          # "auto" | "cuda" | "cpu"
 project: "vlm_vad"
-experiment: "baseline"
+experiment: "official_zero_shot"
 
 # === Paths (consumed by train.py / eval.py) ===
 paths:
@@ -21,7 +22,7 @@ paths:
   checkpoint_dir: "checkpoints"
   result_dir: "results"
   feature_dir: "data/features_v2"
-  run_name: "baseline_v2"
+  run_name: "official_zero_shot"
 
 # === Data (consumed by datasets/builders.py + datasets/dataloader.py) ===
 data:
@@ -42,17 +43,17 @@ data:
   image_size: null            # backbone owns resize, crop and normalization
   video_backend: "auto"        # "auto" | "decord" | "opencv"
 
-  # labels — masks are downsampled grayscale frames, so pseudo labels are used
-  frame_label_mode: "motion_diff"   # "pixel" | "motion_diff"
+  # Official evaluation only: training annotations are not included in the ZIP
+  frame_label_mode: "official"   # verified official testing annotations
   motion_threshold: 3.0
 
   # dataloader
   batch_size: 4
-  num_workers: 4
+  num_workers: 0
 
   # feature cache (fast path, ~10x)
   feature_dir: "data/features_v2"
-  label_dir: "data/labels_v2"
+  label_dir: "data/labels_official"
   use_feature: "auto"          # auto | true (required) | false (pixel path)
   allow_missing: false
 
@@ -113,4 +114,4 @@ eval:
   batch_size: 4
   top_k_prompts: 5
   save_plots: true
-  text_pool: "mean"     # zero-shot text pooling: "mean" (aligns with training) | "eos"
+  text_pool: "eos"     # zero-shot text pooling: "mean" (aligns with training) | "eos"

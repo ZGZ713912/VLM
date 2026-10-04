@@ -99,9 +99,11 @@ def _build_timeline_background(
     threshold: float,
     lo: float,
     hi: float,
+    label_name: str = "GT",
 ) -> np.ndarray:
     """预渲染时间轴静态层（GT 色带 + 阈值 + 完整曲线 + 坐标轴）。"""
-    tl = np.full((CANVAS_H - 540, CANVAS_W, 3), TIMELINE_BG, dtype=np.uint8)
+    # Coordinates below are absolute canvas coordinates, including the bottom panel.
+    tl = np.full((CANVAS_H, CANVAS_W, 3), TIMELINE_BG, dtype=np.uint8)
     n = len(scores)
 
     def y_of(s: float) -> int:
@@ -133,7 +135,7 @@ def _build_timeline_background(
     _put(tl, "score", (TL_X0 - 62, (TL_Y0 + TL_Y1) // 2), 0.42)
     _put(tl, f"frame 0", (TL_X0, TL_Y1 + 18), 0.42)
     _put(tl, f"frame {n - 1}", (TL_X1 - 90, TL_Y1 + 18), 0.42)
-    _put(tl, "GT abnormal (red band) | anomaly score curve", (TL_X0, 552), 0.46)
+    _put(tl, f"{label_name} positive (band) | anomaly score curve", (TL_X0, 552), 0.46)
     return tl
 
 
@@ -207,6 +209,7 @@ def render_video(
     fps: float,
     threshold: float | None,
     top_k: int,
+    label_mode: str = "pixel",
 ) -> dict:
     """渲染一个视频的 MP4 + GIF，返回给 index.md 用的摘要。"""
     n = len(scores)
@@ -217,13 +220,14 @@ def render_video(
         threshold = float(np.quantile(scores, 0.90))
     lo = float(max(0.0, scores.min() - 0.05))
     hi = float(min(1.0, scores.max() + 0.05))
-    if hi - lo < 0.2:
+    if hi - lo < 1e-4:
         mid = (hi + lo) / 2
-        lo, hi = max(0.0, mid - 0.1), min(1.0, mid + 0.1)
+        lo, hi = mid - 5e-5, mid + 5e-5
 
-    tl_bg = _build_timeline_background(scores, labels, threshold, lo, hi)
+    label_name = "PSEUDO" if label_mode == "motion_diff" else "GT"
+    tl_bg = _build_timeline_background(scores, labels, threshold, lo, hi, label_name)
     base = np.full((CANVAS_H, CANVAS_W, 3), PANEL_BG, dtype=np.uint8)
-    base[540:720, :] = TIMELINE_BG
+    base[540:720, :] = tl_bg[540:720, :]
 
     top_prompts = explanation.get("top_prompts", [])[:top_k]
 
@@ -256,7 +260,7 @@ def render_video(
 
         # 画面边框 + 角标
         cv2.rectangle(canvas, (2, 2), (FRAME_W - 3, FRAME_H - 3), color, 6)
-        badge = f"{'ABNORMAL' if is_abn else 'NORMAL'}  {score:.2f}"
+        badge = f"{'HIGH SCORE' if is_abn else 'LOW SCORE'}  {score:.2f}"
         (tw, th), _ = cv2.getTextSize(badge, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
         cv2.rectangle(canvas, (16, 16), (16 + tw + 24, 16 + th + 22), color, -1)
         _put(canvas, badge, (28, 16 + th + 6), 1.0, (255, 255, 255), 2)
@@ -271,13 +275,13 @@ def render_video(
         _put(canvas, f"time  {t / fps:.1f} s", (x_text, y), 0.5)
         y += 26
         gt = "ABNORMAL" if labels[t] > 0 else "normal"
-        _put(canvas, f"GT    {gt}", (x_text, y), 0.5,
+        _put(canvas, f"{label_name} {gt}", (x_text, y), 0.5,
              COLOR_ABNORMAL if labels[t] > 0 else COLOR_NORMAL)
         y += 26
         _put(canvas, f"score {score:.3f}", (x_text, y), 0.5, color)
         y += 40
 
-        _put(canvas, "TOP ABNORMAL PROMPTS", (x_text, y), 0.48)
+        _put(canvas, "CANDIDATE DESCRIPTIONS", (x_text, y), 0.48)
         y += 26
         if top_prompts:
             for rank, p in enumerate(top_prompts, start=1):
@@ -324,7 +328,7 @@ def render_video(
     # 最异常帧拼接图
     top_idx = np.argsort(scores)[::-1][:top_k]
     _save_top_frames(video_path, vid, scores, labels, top_idx,
-                     out_dir / f"{vid}_top_frames.png")
+                     out_dir / f"{vid}_top_frames.png", label_name)
 
     # 整段视频时间轴
     plot_temporal_heatmap(
@@ -354,6 +358,7 @@ def _save_top_frames(
     labels: np.ndarray,
     top_idx: np.ndarray,
     save_path: Path,
+    label_name: str = "GT",
 ) -> None:
     import matplotlib
 
@@ -375,7 +380,7 @@ def _save_top_frames(
         ax.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         gt = "ABNORMAL" if labels[idx] > 0 else "normal"
         ax.set_title(
-            f"frame {int(idx)} | score {float(scores[idx]):.3f} | GT {gt}",
+            f"frame {int(idx)} | score {float(scores[idx]):.3f} | {label_name} {gt}",
             fontsize=9,
         )
     cap.release()
@@ -400,6 +405,7 @@ def _write_index(
     ckpt: str,
     cfg_path: str,
     started: str,
+    label_mode: str = "motion_diff",
 ) -> None:
     lines = [
         "# VLM-VAD 可视化演示",
@@ -407,16 +413,18 @@ def _write_index(
         f"- 生成时间：{started}",
         f"- checkpoint：`{ckpt}`",
         f"- 配置：`{cfg_path}`",
-        "- 逐帧标签来源：`motion_diff` 运动伪标签（**非官方 mask，仅供框架验证**）",
+        ("- 逐帧标签来源：`motion_diff` 运动伪标签（**非官方 mask，仅供框架验证**）"
+         if label_mode == "motion_diff" else f"- 逐帧标签来源：{label_mode} 二值 mask 派生帧标签"),
         "",
-        "| Video | Frames | GT abnormal | Frame AUC | Peak score | Top abnormal prompt | MP4 | GIF | Top frames |",
+        "| Video | Frames | Positive labels | Frame AUC | Peak score | Candidate description | MP4 | GIF | Top frames |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for s in summaries:
         vid = s["vid"]
         auc = per_video.get(vid, {}).get("frame_auc", float("nan"))
+        auc_display = "undefined" if auc is None else f"{auc:.3f}"
         lines.append(
-            f"| {vid} | {s['num_frames']} | {s['num_anomaly']} | {auc:.3f} | "
+            f"| {vid} | {s['num_frames']} | {s['num_anomaly']} | {auc_display} | "
             f"{s['peak_score']:.3f} | `{s['top_prompt']}` | "
             f"[mp4]({vid}_demo.mp4) | [gif]({vid}_demo.gif) | "
             f"[png]({vid}_top_frames.png) |"
@@ -428,7 +436,8 @@ def _write_index(
         exp = explanations.get(vid, {})
         lines.append(f"### Video {vid}")
         lines.append("")
-        lines.append(f"- Frame AUC：{per_video.get(vid, {}).get('frame_auc', float('nan')):.4f}")
+        auc = per_video.get(vid, {}).get("frame_auc")
+        lines.append("- Frame AUC：" + ("undefined" if auc is None else f"{auc:.4f}"))
         lines.append(f"- 阈值：{s['threshold']:.3f}")
         lines.append(f"- 时间轴：[timeline_{vid}.png](timeline_{vid}.png)")
         lines.append("")
@@ -442,8 +451,7 @@ def _write_index(
         "- 红框阈值默认取该视频 frame score 的 90 分位（展示用相对阈值，",
         "  非模型校准后的决策边界）；可用 `--threshold` 覆盖。",
         "- 模型只输出**帧级**分数，红框表示该帧分数超过阈值，不能定位画面中具体区域。",
-        "- 当前标签为 `motion_diff` 伪标签，**不能作为学术结论**；获取官方二值 mask 后",
-        "  切换 `frame_label_mode: pixel` 重新训练/评估。",
+        "- 候选描述为 prompt 检索结果，不能作为已确认的事件类别。",
         "",
     ]
     (out_dir / "index.md").write_text("\n".join(lines), encoding="utf-8")
@@ -479,6 +487,8 @@ def main() -> None:
     model = build_model(cfg)
     matcher = build_matcher(cfg.model)
     state = load_checkpoint(args.ckpt)
+    from utils.provenance import validate_checkpoint
+    validate_checkpoint(state, cfg, model.prompt_processor.process())
     model.load_state_dict(state["model_state"])
     if "matcher_state" in state:
         matcher.load_state_dict(state["matcher_state"])
@@ -488,6 +498,7 @@ def main() -> None:
     eval_split = str(cfg.data.eval_split)
     loader, src = build_split_dataloader(
         cfg.data, split=eval_split, shuffle=False, seed=int(cfg.seed),
+        backbone_cfg=cfg.model.backbone,
     )
     log.info("Eval data ready | split=%s source=%s batches=%d",
              eval_split, src, len(loader))
@@ -535,6 +546,7 @@ def main() -> None:
             fps=float(args.fps),
             threshold=args.threshold,
             top_k=int(args.top_k),
+            label_mode=str(cfg.data.frame_label_mode),
         )
         summaries.append(summary)
         log.info("  done: %s_demo.mp4 | peak=%.3f | GT=%d frames",
@@ -544,6 +556,7 @@ def main() -> None:
         _write_index(
             out_dir, summaries, explanations, per_video,
             ckpt=str(args.ckpt), cfg_path=str(args.config), started=started,
+            label_mode=str(cfg.data.frame_label_mode),
         )
     log.info("Demo written to %s (%d videos)", out_dir, len(summaries))
     log.info("Open %s/index.md for the summary", out_dir)

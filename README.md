@@ -4,6 +4,51 @@
 
 > **核心思想：** Vision-Language Model + Prompt Engineering → Video Anomaly Detection + Explainability
 
+当前开发进度、已修复问题和未完成的研究任务见 [项目审计报告](docs/project_audit.md)。
+默认 v2 流程将 16 个训练视频按 seed 划分为 12 个训练、4 个验证视频；21 个测试视频
+只用于最终评估。旧 `exp01` 属于历史工程结果，不能作为独立测试集上的官方成绩。
+
+官方标注已经接入：`data/labels_official/testing` 共 21 视频、15,324 帧、3,712 异常帧。
+完整结果与当前限制见 [官方评估报告](docs/official_evaluation.md)。
+下列命令在项目容器内执行；已有缓存可以直接评估，重复实验请使用新结果目录：
+
+```bash
+# 首次转换；验证原始 ZIP、视频 ID、帧数、二值 mask 和文件校验值
+python tools/prepare_official_labels.py --archive data/ground_truth_demo.zip --root data --out data/labels_official
+# 固定的四组 prompt 比较，EOS 文本池化，不使用测试标签选优
+python scripts/prompt_comparison.py --config configs/official_eval.yaml --output results/my_official_zero_shot/summary.json --out-dir results/my_official_zero_shot
+# 仅从训练视频建立正常特征库；留出训练视频校准，测试真值只用于计分
+python scripts/normality_baseline.py --out-dir results/my_normality --checkpoint checkpoints/my_normality/memory.pt
+# 原有六个模型的真实标签复评，保留原训练协议
+python scripts/reevaluate_official.py --source-sweep results/stage2_verified_sweep/summary.json --out-dir results/my_official_recheck
+```
+
+`configs/official_eval.yaml` 专用于官方测试评估，不能用于训练；压缩包没有训练标注。
+默认 `configs/experiment.yaml` 仍是运动伪标签的工程训练协议。
+报告采用全部测试帧的原始分数计算 Frame AUC/AP，不做逐视频分数归一化。
+测试视频均含异常，Video ROC-AUC 显示 `null`；全异常视频的 Frame ROC-AUC 同样未定义。
+
+开始新实验前生成 v2 标签和特征（已有 v2 缓存时可跳过）：
+
+```bash
+python tools/extract_motion_labels.py --root data --split training --out data/labels_v2
+python tools/extract_motion_labels.py --root data --split testing --out data/labels_v2
+python tools/extract_video_features.py --root data --split training --out data/features_v2/training
+python tools/extract_video_features.py --root data --split testing --out data/features_v2/testing
+python scripts/run_experiments.py --dry-run
+python scripts/run_experiments.py --output results/stage2_verified_sweep
+```
+
+`configs/sweep.yaml` 自动运行 prompt × fusion × backbone × seed 矩阵；当前默认是
+3 种 prompt × 2 种 fusion × 1 个 backbone × 1 个 seed，每组训练 1 轮，用于验证实验流程。
+失败组记录日志且整体返回非零。重复运行使用新的 sweep name，避免覆盖已存在的 checkpoint。
+单独训练使用 `python train.py --config configs/experiment.yaml --run-name my_run`。
+
+`data.use_feature: auto` 自动选缓存，`true` 强制缓存，`false` 强制像素路径。
+新缓存必须有匹配 encoder / pretrained / preprocessing 的 manifest；旧缓存需重新提取。
+在线与离线编码共用 RGB resize/crop/normalize 路径。非 CLIP 编码器可通过
+`models.registry.backbones.register(name, factory)` 接入，再配置 `model.backbone.provider`。
+
 ## 前置要求
 
 | 依赖 | 说明 |
@@ -98,8 +143,8 @@ CPU 主机把 `.env` 的 `BASE_IMAGE` 切到 `pytorch/pytorch:2.3.1-cpu` 后重�
 `data/labels/{split}/` 读取）：
 
 ```bash
-python tools/extract_motion_labels.py --root ./data --split training --out ./data/labels --threshold 3.0
-python tools/extract_motion_labels.py --root ./data --split testing  --out ./data/labels --threshold 3.0
+python tools/extract_motion_labels.py --root ./data --split training --out ./data/labels_v2 --threshold 3.0
+python tools/extract_motion_labels.py --root ./data --split testing  --out ./data/labels_v2 --threshold 3.0
 ```
 
 ### 阶段 2 · Zero-shot baseline（无需训练，秒级）
@@ -132,18 +177,18 @@ backbone 冻结时，视觉特征与输入无关的部分可预先算好，训�
 ```bash
 python tools/extract_video_features.py --root ./data --split training \
     --model ViT-B-32 --pretrained laion2b_s34b_b79k \
-    --out ./data/features/training --batch-size 64
+    --out ./data/features_v2/training --batch-size 64
 
 python tools/extract_video_features.py --root ./data --split testing \
-    --out ./data/features/testing --batch-size 64
+    --out ./data/features_v2/testing --batch-size 64
 
 # （可选）预编码 prompt 文本特征
 python tools/extract_text_features.py --config configs/prompts.yaml \
     --out ./data/features/text/prompts.pt
 ```
 
-提取完成后无需改代码：`datasets/builders.py` 检测到 `data/features/{split}/`
-存在就会自动走 `FeatureDataset`（也可显式设 `data.use_feature: true`）。
+提取完成后无需改代码：`datasets/builders.py` 在 auto 模式检测 `data/features_v2/{split}/`
+并校验 manifest 后走 `FeatureDataset`（也可显式设 `data.use_feature: true`）。
 此时 batch 中的 key 由 `video` 变为 `vis_feat`，Trainer/推理会自动选择
 `model.forward_from_visual()` 路径。
 
@@ -158,7 +203,7 @@ python train.py --config configs/experiment.yaml --epochs 1 --run-name smoke
 
 # 续训（模型/优化器/调度器/epoch 全量恢复）
 python train.py --config configs/experiment.yaml \
-    --resume ./checkpoints/exp01/last.pt
+    --resume ./checkpoints/baseline_v2/last.pt
 ```
 
 每个 batch 的闭环为：`forward → VLMVADLoss(BCE + 对比对齐) → backward →
@@ -175,11 +220,11 @@ grad_clip → optimizer.step → scheduler.step → 日志`（见 `train/trainer
 ```bash
 # 只评估已有 checkpoint（不重新训练）
 python eval.py --config configs/experiment.yaml \
-    --ckpt ./checkpoints/exp01/best.pt
+    --ckpt ./checkpoints/baseline_v2/best.pt
 
 # 在训练集上评估（可选）
 python eval.py --config configs/experiment.yaml \
-    --ckpt ./checkpoints/exp01/best.pt --eval-split training
+    --ckpt ./checkpoints/baseline_v2/best.pt --eval-split training
 ```
 
 评估输出到 `results/{run_name}/`：
@@ -190,12 +235,16 @@ python eval.py --config configs/experiment.yaml \
 | `explanations.json` | 每个视频最异常 clip 的 top-k prompt、异常帧排名、自然语言解释 |
 | `plots/{id}_heatmap.png` | 时序异常热力图（帧分数曲线 + GT 色带） |
 | `plots/{id}_prompts.png` | 该 clip 对每个 prompt 的相似度条形图 |
-| `config.yaml` | 本次运行的完整配置快照（可复现性，AGENTS.md §7） |
+| `config.yaml` | 自包含配置快照，后续外部 prompt 文件变化不会改写本次配置 |
+| `frame_scores.npz` / `frame_labels.npz` | 完整视频逐帧分数与标签 |
+| `split_manifest.json` / `environment.json` | 训练/验证视频划分、运行依赖和设备 |
 
 解释文本回答「为什么这个视频是异常的」：取相似度最高的异常 prompt 作为原因，
 例如 **“该视频段（起始帧 512）被判定为异常，因为画面语义与 `a person fighting`
 (sim=0.31) 最接近……”**。底层模型输出的张量契约见 `models/outputs.py`：
-`frame_score (B,T)`、`clip_score (B,)`、`embedding (B,D_f)`；zero-shot 路径
+`frame_score (B,T)`、`anomaly_score (B,)`（兼容 `clip_score`）、`embedding (B,D_f)`、
+`explanation`（模型前向可为 None，评估时生成模板解释）；`output.to_dict()` 保留梯度。
+zero-shot 路径
 （`eval/zero_shot.py`）额外按 AGENTS.md §4 汇总 `anomaly_score` / `frame_score` /
 `embedding` / `explanation` 四个字段。
 
@@ -206,7 +255,7 @@ python eval.py --config configs/experiment.yaml \
 
 ```bash
 python scripts/visualize_demo.py --config configs/experiment.yaml \
-    --ckpt checkpoints/exp01/best.pt --videos 01 06 18 --out results/demo
+    --ckpt checkpoints/baseline_v2/best.pt --videos 01 06 18 --out results/demo
 ```
 
 | 产物（`results/demo/`） | 内容 |
@@ -247,7 +296,7 @@ python train.py --config configs/experiment.yaml --run-name fusion_crossattn
 ```
 
 `scripts/prompt_comparison.py` 会把多组 prompt 实验汇总成 markdown 表，当前仓库
-示例（zero-shot, frozen CLIP, Avenue testing）：
+历史 v1 示例（zero-shot, frozen CLIP, Avenue testing，运动伪标签；不能作为官方异常检测成绩）：
 
 | experiment | #prompts | Frame AUC | Video AUC |
 |---|---|---|---|
@@ -278,7 +327,8 @@ PyTorch / dataloader shuffle），seed 来自 `configs/experiment.yaml: seed`。
   运动伪标签，VAD 经典 baseline 之一，配合自带数据即可跑通流程，**学术结论请使用真实 mask**。
 - 若你持有**官方二值 mask**：把 `configs/experiment.yaml` 改为 `frame_label_mode: pixel`
   后再训练/评估，无需其他改动。
-- 代码会自动检测可疑 mask 并在日志里提醒（`datasets/video_dataset.py: mask_looks_like_frames`）。
+- pixel 模式发现灰度视频帧伪装成 mask 会直接报错，防止生成全部为异常的错误标签。
+  特征路径严格遵守 frame_label_mode，pixel 模式不会读取运动伪标签缓存。
 
 ### GPU 主机
 
@@ -309,8 +359,8 @@ data/
 └── Avenue_Dataset/          # 从官网下载后解压到这里
     ├── training_videos/     # 16 个训练视频 (.avi)
     ├── testing_videos/      # 21 个测试视频 (.avi)
-    ├── training_vol/        # 16 个像素级标注 (.mat)
-    └── testing_vol/         # 21 个像素级标注 (.mat)
+    ├── training_vol/        # 16 个 vol (.mat)，本仓库附件实际为灰度帧体
+    └── testing_vol/         # 21 个 vol (.mat)，不能作为二值异常真值
 ```
 
 > 数据集文件被 `.gitignore` 排除，不会提交到仓库。
@@ -393,6 +443,16 @@ vlm_ws/
 ```bash
 pytest -q
 ```
+
+GPU 与本地 Avenue 缓存的额外检查（不会在普通 CI 中运行）：
+
+```bash
+VLM_REAL_INTEGRATION=1 HF_HUB_OFFLINE=1 python -m pytest -q tests/test_real_pipeline.py
+```
+
+新增回归覆盖视频隔离、matcher 参数更新、全正常 batch 分类梯度、标签模式隔离、
+运动标签跨 chunk 边界、真实 frame_indices 聚合、续训 RNG 恢复、实验矩阵失败状态。
+GPU 检查验证像素/缓存特征一致及 AMP 训练→验证→断点恢复。
 
 覆盖点（`tests/test_smoke.py`）：
 

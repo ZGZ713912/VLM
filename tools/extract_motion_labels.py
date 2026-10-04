@@ -62,14 +62,19 @@ def extract(
         step = 256  # 每次最多读 256 帧，避免一次性占满内存
         for start in range(0, n, step):
             end = min(start + step, n)
-            indices = np.arange(start, end, dtype=np.int64)
+            # Include the predecessor across chunk boundaries, then remove it from output.
+            indices = np.arange(max(0, start - 1), end, dtype=np.int64)
             frames = _read_frames_opencv(vr.video_path, indices)  # (T,H,W,C) uint8
-            labels.append(_compute_motion_labels(frames, threshold))
+            chunk_labels = _compute_motion_labels(frames, threshold)
+            labels.append(chunk_labels[1:] if start > 0 else chunk_labels)
 
         label = np.concatenate(labels)  # (N,)
         torch.save(torch.from_numpy(label), out_path / f"{vr.video_id}.pt")
         print(f"saved {split}/{vr.video_id}.pt  shape={label.shape}  "
               f"#anomaly={int(label.sum())}/{n}")
+    from utils.io import save_json
+    save_json({"label_mode": "motion_diff", "threshold": threshold,
+               "version": 2, "split": split}, out_path / "manifest.json")
 
 
 def main() -> None:
