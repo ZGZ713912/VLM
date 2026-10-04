@@ -1,0 +1,10 @@
+# 本地重建覆盖层：仅在修改 Dockerfile / requirements 后使用。
+# 用法：docker compose -f docker-compose.yml -f docker-compose.build.yml build
+services:
+  vlm-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: "${BASE_IMAGE:-pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime}"
+        INSTALL_OPTIONAL_SHELL_TOOLS: "1"

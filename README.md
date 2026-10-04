@@ -67,14 +67,18 @@ cd vlm_ws
 # 2. 创建环境变量文件
 cp .env.example .env
 
-# 3. 构建镜像（首次约 5-10 分钟）
-docker compose build
-
-# 4. 启动容器
+# 3. 启动容器（镜像自动从 Docker Hub 拉取 zgzdocker/vlm-ws:dev，首次约 1-5 分钟）
 docker compose up -d
 
-# 5. 进入开发环境
+# 4. 进入开发环境
 docker compose exec vlm-dev zsh
+```
+
+镜像由 GitHub Actions 自动构建并推送（`.github/workflows/docker-publish.yml`）。
+仅当修改了 `Dockerfile` 或 `requirements/` 时需要本地重建：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml build
 ```
 
 ## 异常视频检测完整流程
@@ -124,13 +128,14 @@ Avenue 视频 (B,T,C,H,W) ──┐
 
 ```bash
 cp .env.example .env          # 首次
-docker compose build          # 首次约 5-10 分钟
-docker compose up -d
+docker compose up -d          # 自动 pull 预构建镜像，首次约 1-5 分钟
 docker compose exec vlm-dev zsh
 ```
 
 GPU 主机使用 `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`；
-CPU 主机把 `.env` 的 `BASE_IMAGE` 切到 `pytorch/pytorch:2.3.1-cpu` 后重建。
+CPU / 核显主机直接 `docker compose up -d`（同一镜像，无需改动）。
+修改 `Dockerfile` / `requirements/` 后本地重建：
+`docker compose -f docker-compose.yml -f docker-compose.build.yml build`。
 
 ### 阶段 1 · 数据与标注
 
@@ -336,13 +341,12 @@ PyTorch / dataloader shuffle），seed 来自 `configs/experiment.yaml: seed`。
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
 
-### CPU 主机
+### CPU / 核显主机
 
-在 `.env` 中切换为 CPU 镜像：
+同一镜像直接运行即可，不加 gpu 覆盖层（容器内 `torch.cuda.is_available()` 自动为 `False`）：
 
 ```bash
-sed -i 's|^BASE_IMAGE=.*|BASE_IMAGE=pytorch/pytorch:2.3.1-cpu|' .env
-docker compose build
+docker compose up -d
 ```
 
 ## 数据集
@@ -427,8 +431,10 @@ vlm_ws/
 ├── tests/                   # 冒烟测试（配置 / 极性 / 指标 / forward / loss）
 ├── pytest.ini               # pytest 配置（pythonpath = 项目根）
 ├── .github/workflows/ci.yml # CI：push / PR 自动跑 pytest
+├── .github/workflows/docker-publish.yml # 镜像自动构建并推送 Docker Hub
 ├── Dockerfile               # 镜像构建文件
-├── docker-compose.yml       # 开发容器编排
+├── docker-compose.yml       # 开发容器编排（pull 预构建镜像）
+├── docker-compose.build.yml # 本地重建覆盖层
 ├── docker-compose.gpu.yml   # GPU 覆盖配置
 ├── .env.example             # 环境变量模板
 ├── .devcontainer/           # VS Code Dev Container 配置
@@ -482,7 +488,8 @@ tensorboard --logdir logs --host 0.0.0.0 --port 6006
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `BASE_IMAGE` | `pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime` | 基础镜像 |
+| `VLM_IMAGE` | `zgzdocker/vlm-ws:dev` | `docker compose up` 拉取的镜像地址 |
+| `BASE_IMAGE` | `pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime` | 本地构建用基础镜像（仅 `docker-compose.build.yml`） |
 | `LOCAL_UID:GID` | `1000:1000` | 容器内用户 ID |
 | `SHM_SIZE` | `16gb` | 共享内存大小 |
 | `JUPYTER_PORT` | `8888` | Jupyter 端口映射 |
