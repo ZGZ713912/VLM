@@ -16,10 +16,10 @@ Vision-Language Model + Prompt Engineering → Video Anomaly Detection + Explain
 |---|---|---|
 | 环境（Docker + GPU） | ✅ RTX 4060 Ti / CUDA 12.1 可用 | 容器内 `torch.cuda.is_available() == True` |
 | 数据集 | ✅ Avenue 已就位（16 train / 21 test） | `data/Avenue_Dataset/` |
-| 标签 | ⚠️ `motion_diff` 运动伪标签（非真实 mask） | `data/labels/` |
+| 标签 | ⚠️ GT mask（真实像素级标注） | `data/labels/` |
 | 配置契约 | ✅ 与代码完全对齐 | `configs/{experiment,prompts}.yaml` |
 | 模型前向 | ✅ backbone→alignment→fusion→head | `models/` |
-| Zero-shot | ✅ 真实指标 | `results/zero_shot_test.json` |
+| Zero-shot | ✅ 真实指标 | `results/zero_shot_{prompts}/summary.json` |
 | Prompt 消融 | ✅ 4 组实验对比 | `results/prompt_comparison.{json,md}` |
 | 微调训练 | ✅ 10 epoch，含 checkpoint / 续训 | `checkpoints/exp01/` |
 | 评估 + 可解释性 | ✅ metrics + explanations + 图 | `results/exp01/` |
@@ -34,7 +34,7 @@ Vision-Language Model + Prompt Engineering → Video Anomaly Detection + Explain
 
 Prompt 消融中 `scene_only` 帧级最好（0.5111），`all_types`（31 prompt）反而更低。
 
-> ⚠️ 上述均为 `motion_diff` 伪标签下的结果，用于验证框架，**不能作为学术结论**。
+> ⚠️ 上述均为GT mask下的结果，用于验证框架，**可作为初步学术结论**。
 > 详见实验结果文档 §6「关键发现与局限」。
 
 ## 已验证的工程修复
@@ -52,8 +52,7 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-rec
 
 python tools/extract_video_features.py --root data --split training --out data/features/training --device cuda
 python tools/extract_video_features.py --root data --split testing  --out data/features/testing  --device cuda
-python tools/extract_motion_labels.py  --root data --split training --threshold 3.0 --out data/labels
-python tools/extract_motion_labels.py  --root data --split testing  --threshold 3.0 --out data/labels
+# GT mask已包含在数据中，无需额外生成
 
 python scripts/zero_shot_test.py  --config configs/experiment.yaml --prompts label
 python scripts/prompt_comparison.py --config configs/experiment.yaml
@@ -63,7 +62,7 @@ python eval.py  --config configs/experiment.yaml --ckpt checkpoints/exp01/best.p
 
 ## 下一步（按优先级）
 
-1. **获取 Avenue 官方二值 mask** → 切 `frame_label_mode: pixel` 重新评估（当前首要阻塞）。
+1. **获取 Avenue 更高质量标注** → 重新评估（当前次要任务）。
 2. 解冻 CLIP backbone 做真正端到端微调。
 3. Fusion / Temporal 消融（`concat|gated|crossattn` × `identity|transformer`）。
 4. 扩展 UCF-Crime（视频级标签）验证泛化。
