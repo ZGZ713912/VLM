@@ -59,7 +59,7 @@ class FeatureDataset(Dataset[dict[str, Any]]):
             split="training",
             clip_length=16,
         )
-        sample = ds[0]  # {"vis_feat": (16, 512), "frame_label": (16,), ...}
+        sample = ds[0]  # {"vis_feat": (16, 512), "frame_label": (16,), "frame_indices": (16,), ...}
     """
 
     def __init__(
@@ -259,4 +259,6 @@ class FeatureDataset(Dataset[dict[str, Any]]):
             "clip_label": frame_label.amax(),    # scalar
             "video_id": vr.video_id,
             "start_frame": clip.start_frame,
+            # (T,) 每个 clip 帧在原视频中的真实下标（含 clip_stride 跨步与边界裁剪）
+            "frame_indices": torch.from_numpy(indices),
         }

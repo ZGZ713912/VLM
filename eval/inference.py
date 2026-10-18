@@ -49,24 +49,43 @@ from utils.visualization import (
 log = get_logger(__name__)
 
 
+def _scatter_scores(
+    accum: np.ndarray,
+    counts: np.ndarray,
+    indices: np.ndarray,
+    scores: np.ndarray,
+) -> None:
+    """把一段 clip 的帧分数按**真实帧下标**散写累加。
+
+    为什么不能按 ``start + j`` 连续写：dataset 侧 clip 第 j 帧对应原视频
+    第 ``indices[j]`` 帧——当 ``clip_stride != 1`` 时二者不等（跨步采样），
+    且边界裁剪可能产生重复下标；``np.add.at`` 正确处理重复。
+    """
+    valid = (indices >= 0) & (indices < len(accum))
+    idx = indices[valid]
+    np.add.at(accum, idx, scores[valid])
+    np.add.at(counts, idx, 1.0)
+
+
 def _accumulate_scores(
     accum: np.ndarray,
     counts: np.ndarray,
+    batch: dict[str, Any],
+    b: int,
     start: int,
     scores: np.ndarray,
 ) -> None:
-    """把一段 clip 的帧分数按坐标累加。
+    """取出 batch 中第 b 个 clip 的真实帧下标并散写累加。
 
-    Args:
-        accum: ``(N,)`` 累加和数组（按视频总帧数初始化）。
-        counts: ``(N,)`` 每帧被覆盖次数。
-        start: clip 起始帧坐标。
-        scores: ``(T,)`` 该 clip 的逐帧分数。
+    Dataset（VideoDataset/FeatureDataset）在 ``frame_indices`` 里提供每个
+    clip 帧在原视频中的真实下标；自定义 dataset 未提供时退化为
+    ``start + j`` 连续写入（等价于旧的 clip_stride=1 假设）。
     """
-    end = min(start + len(scores), len(accum))
-    n = end - start
-    accum[start:end] += scores[:n]
-    counts[start:end] += 1.0
+    if batch.get("frame_indices", None) is not None:
+        indices = batch["frame_indices"][b].cpu().numpy().astype(np.int64)
+    else:
+        indices = start + np.arange(len(scores), dtype=np.int64)
+    _scatter_scores(accum, counts, indices, scores)
 
 
 def _pool_text_tokens(text_feature: Tensor, token_mask: Tensor) -> Tensor:
@@ -274,13 +293,13 @@ def evaluate_videos(
                         "anomaly_sims": None, "frame_scores": None,
                     }
 
-                _accumulate_scores(accum[vid], counts[vid], start, fs)
+                _accumulate_scores(accum[vid], counts[vid], batch, b, start, fs)
                 # 标签同样按坐标累加（与分数对齐，保证评估逻辑与标签来源解耦）
-                _accumulate_scores(label_acc[vid], label_cnt[vid], start, lbl.astype(np.float64))
+                _accumulate_scores(label_acc[vid], label_cnt[vid], batch, b, start, lbl.astype(np.float64))
 
                 # 零样本保底分数同样按坐标累加（共用 counts，覆盖次数一致）
                 if zs_fs is not None:
-                    _accumulate_scores(accum_zs[vid], counts[vid], start, zs_fs[b])
+                    _accumulate_scores(accum_zs[vid], counts[vid], batch, b, start, zs_fs[b])
                     zs_clip_scores.append(float(zs_fs[b].max()))
 
                 # clip 级收集

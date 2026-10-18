@@ -230,7 +230,8 @@ class VideoDataset(Dataset[dict[str, Any]]):
     """Clip-based dataset — reads raw video frames from disk at query time.
 
     Each ``__getitem__`` opens the video file, decodes T frames, normalizes,
-    and returns ``{video, frame_label, pixel_mask, clip_label, video_id, start_frame}``.
+    and returns ``{video, frame_label, pixel_mask, clip_label, video_id,
+    start_frame, frame_indices}``.
 
     Use when:
     - Backbone is trainable (needs raw pixels for gradient flow)
@@ -386,4 +387,6 @@ class VideoDataset(Dataset[dict[str, Any]]):
             "clip_label": frame_label.amax(),    # scalar
             "video_id": vr.video_id,
             "start_frame": clip.start_frame,
+            # (T,) 每个 clip 帧在原视频中的真实下标（含 clip_stride 跨步与边界裁剪）
+            "frame_indices": torch.from_numpy(indices),
         }
