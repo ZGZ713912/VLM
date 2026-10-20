@@ -26,6 +26,9 @@ env/
 
 # ── Dataset (large binary files — download separately) ──────
 data/Avenue_Dataset/
+data/features*/
+data/labels*/
+data/ground_truth_demo.zip
 
 # ── Runtime outputs (keep dirs via .gitkeep) ────────────────
 checkpoints/*

@@ -1,12 +1,7 @@
 services:
   vlm-dev:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BASE_IMAGE: "${BASE_IMAGE:-pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime}"
-        INSTALL_OPTIONAL_SHELL_TOOLS: "1"
-    image: vlm-ws:dev
+    image: ${VLM_IMAGE:-zgzdocker/vlm-ws:dev}
+    pull_policy: missing
     container_name: vlm-ws-dev
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     working_dir: /workspace/vlm_ws

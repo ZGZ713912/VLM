@@ -4,6 +4,51 @@
 
 > **核心思想：** Vision-Language Model + Prompt Engineering → Video Anomaly Detection + Explainability
 
+当前开发进度、已修复问题和未完成的研究任务见 [项目审计报告](docs/project_audit.md)。
+默认 v2 流程将 16 个训练视频按 seed 划分为 12 个训练、4 个验证视频；21 个测试视频
+只用于最终评估。旧 `exp01` 属于历史工程结果，不能作为独立测试集上的官方成绩。
+
+官方标注已经接入：`data/labels_official/testing` 共 21 视频、15,324 帧、3,712 异常帧。
+完整结果与当前限制见 [官方评估报告](docs/official_evaluation.md)。
+下列命令在项目容器内执行；已有缓存可以直接评估，重复实验请使用新结果目录：
+
+```bash
+# 首次转换；验证原始 ZIP、视频 ID、帧数、二值 mask 和文件校验值
+python tools/prepare_official_labels.py --archive data/ground_truth_demo.zip --root data --out data/labels_official
+# 固定的四组 prompt 比较，EOS 文本池化，不使用测试标签选优
+python scripts/prompt_comparison.py --config configs/official_eval.yaml --output results/my_official_zero_shot/summary.json --out-dir results/my_official_zero_shot
+# 仅从训练视频建立正常特征库；留出训练视频校准，测试真值只用于计分
+python scripts/normality_baseline.py --out-dir results/my_normality --checkpoint checkpoints/my_normality/memory.pt
+# 原有六个模型的真实标签复评，保留原训练协议
+python scripts/reevaluate_official.py --source-sweep results/stage2_verified_sweep/summary.json --out-dir results/my_official_recheck
+```
+
+`configs/official_eval.yaml` 专用于官方测试评估，不能用于训练；压缩包没有训练标注。
+默认 `configs/experiment.yaml` 仍是运动伪标签的工程训练协议。
+报告采用全部测试帧的原始分数计算 Frame AUC/AP，不做逐视频分数归一化。
+测试视频均含异常，Video ROC-AUC 显示 `null`；全异常视频的 Frame ROC-AUC 同样未定义。
+
+开始新实验前生成 v2 标签和特征（已有 v2 缓存时可跳过）：
+
+```bash
+python tools/extract_motion_labels.py --root data --split training --out data/labels_v2
+python tools/extract_motion_labels.py --root data --split testing --out data/labels_v2
+python tools/extract_video_features.py --root data --split training --out data/features_v2/training
+python tools/extract_video_features.py --root data --split testing --out data/features_v2/testing
+python scripts/run_experiments.py --dry-run
+python scripts/run_experiments.py --output results/stage2_verified_sweep
+```
+
+`configs/sweep.yaml` 自动运行 prompt × fusion × backbone × seed 矩阵；当前默认是
+3 种 prompt × 2 种 fusion × 1 个 backbone × 1 个 seed，每组训练 1 轮，用于验证实验流程。
+失败组记录日志且整体返回非零。重复运行使用新的 sweep name，避免覆盖已存在的 checkpoint。
+单独训练使用 `python train.py --config configs/experiment.yaml --run-name my_run`。
+
+`data.use_feature: auto` 自动选缓存，`true` 强制缓存，`false` 强制像素路径。
+新缓存必须有匹配 encoder / pretrained / preprocessing 的 manifest；旧缓存需重新提取。
+在线与离线编码共用 RGB resize/crop/normalize 路径。非 CLIP 编码器可通过
+`models.registry.backbones.register(name, factory)` 接入，再配置 `model.backbone.provider`。
+
 ## 前置要求
 
 | 依赖 | 说明 |
@@ -22,14 +67,18 @@ cd vlm_ws
 # 2. 创建环境变量文件
 cp .env.example .env
 
-# 3. 构建镜像（首次约 5-10 分钟）
-docker compose build
-
-# 4. 启动容器
+# 3. 启动容器（镜像自动从 Docker Hub 拉取 zgzdocker/vlm-ws:dev，首次约 1-5 分钟）
 docker compose up -d
 
-# 5. 进入开发环境
+# 4. 进入开发环境
 docker compose exec vlm-dev zsh
+```
+
+镜像由 GitHub Actions 自动构建并推送（`.github/workflows/docker-publish.yml`）。
+仅当修改了 `Dockerfile` 或 `requirements/` 时需要本地重建：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml build
 ```
 
 ## 异常视频检测完整流程
@@ -79,18 +128,30 @@ Avenue 视频 (B,T,C,H,W) ──┐
 
 ```bash
 cp .env.example .env          # 首次
-docker compose build          # 首次约 5-10 分钟
-docker compose up -d
+docker compose up -d          # 自动 pull 预构建镜像，首次约 1-5 分钟
 docker compose exec vlm-dev zsh
 ```
 
 GPU 主机使用 `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`；
-CPU 主机把 `.env` 的 `BASE_IMAGE` 切到 `pytorch/pytorch:2.3.1-cpu` 后重建。
+CPU / 核显主机直接 `docker compose up -d`（同一镜像，无需改动）。
+修改 `Dockerfile` / `requirements/` 后本地重建：
+`docker compose -f docker-compose.yml -f docker-compose.build.yml build`。
 
 ### 阶段 1 · 数据与标注
 
 1. 按「[数据集](#数据集)」一节把 CUHK Avenue 放入 `data/Avenue_Dataset/`。
-2. 确保GT mask文件存在于对应目录。
+2. 确保 GT mask 文件存在于对应目录（如 `data/Avenue_Dataset/ground_truth/testing_label_mask`），
+   并确认标注模式（**重要**，见下方 ⚠️ 说明）：
+   - 持有**官方二值 mask**（变量名 `volLabel`）→ 保持默认 `data.frame_label_mode: pixel`；
+   - 只有降采样灰度 `vol` 文件 → 可设 `data.frame_label_mode: motion_diff`，用运动伪标签跑通流程。
+
+`motion_diff` / `official` 模式需要先生成 / 准备帧标签缓存（一次性，训练与评估会从
+`data/labels_v2/{split}/` 读取）：
+
+```bash
+python tools/extract_motion_labels.py --root ./data --split training --out ./data/labels_v2 --threshold 3.0
+python tools/extract_motion_labels.py --root ./data --split testing  --out ./data/labels_v2 --threshold 3.0
+```
 
 ### 阶段 2 · Zero-shot baseline（无需训练，秒级）
 
@@ -122,18 +183,18 @@ backbone 冻结时，视觉特征与输入无关的部分可预先算好，训�
 ```bash
 python tools/extract_video_features.py --root ./data --split training \
     --model ViT-B-32 --pretrained laion2b_s34b_b79k \
-    --out ./data/features/training --batch-size 64
+    --out ./data/features_v2/training --batch-size 64
 
 python tools/extract_video_features.py --root ./data --split testing \
-    --out ./data/features/testing --batch-size 64
+    --out ./data/features_v2/testing --batch-size 64
 
 # （可选）预编码 prompt 文本特征
 python tools/extract_text_features.py --config configs/prompts.yaml \
     --out ./data/features/text/prompts.pt
 ```
 
-提取完成后无需改代码：`datasets/builders.py` 检测到 `data/features/{split}/`
-存在就会自动走 `FeatureDataset`（也可显式设 `data.use_feature: true`）。
+提取完成后无需改代码：`datasets/builders.py` 在 auto 模式检测 `data/features_v2/{split}/`
+并校验 manifest 后走 `FeatureDataset`（也可显式设 `data.use_feature: true`）。
 此时 batch 中的 key 由 `video` 变为 `vis_feat`，Trainer/推理会自动选择
 `model.forward_from_visual()` 路径。
 
@@ -148,7 +209,7 @@ python train.py --config configs/experiment.yaml --epochs 1 --run-name smoke
 
 # 续训（模型/优化器/调度器/epoch 全量恢复）
 python train.py --config configs/experiment.yaml \
-    --resume ./checkpoints/exp01/last.pt
+    --resume ./checkpoints/baseline_v2/last.pt
 ```
 
 每个 batch 的闭环为：`forward → VLMVADLoss(BCE + 对比对齐) → backward →
@@ -163,22 +224,13 @@ grad_clip → optimizer.step → scheduler.step → 日志`（见 `train/trainer
 ### 阶段 5 · 评估与可解释性
 
 ```bash
-<<<<<<< HEAD
 # 只评估已有 checkpoint（不重新训练）
 python eval.py --config configs/experiment.yaml \
-    --ckpt ./checkpoints/exp01/best.pt
+    --ckpt ./checkpoints/baseline_v2/best.pt
 
 # 在训练集上评估（可选）
 python eval.py --config configs/experiment.yaml \
-    --ckpt ./checkpoints/exp01/best.pt --eval-split training
-=======
-# 1. 离线提取所有视频帧的 CLIP 特征（一次性）
-python tools/extract_video_features.py --video-dir ./data/Avenue_Dataset/testing_videos \
-    --mask-dir ./data/Avenue_Dataset/ground_truth/testing_label_mask \
-    --out ./data/features/testing
-
-# 2. 在 config 里设置 use_feature: true 即可自动走 FeatureDataset
->>>>>>> dev
+    --ckpt ./checkpoints/baseline_v2/best.pt --eval-split training
 ```
 
 评估输出到 `results/{run_name}/`：
@@ -189,12 +241,16 @@ python tools/extract_video_features.py --video-dir ./data/Avenue_Dataset/testing
 | `explanations.json` | 每个视频最异常 clip 的 top-k prompt、异常帧排名、自然语言解释 |
 | `plots/{id}_heatmap.png` | 时序异常热力图（帧分数曲线 + GT 色带） |
 | `plots/{id}_prompts.png` | 该 clip 对每个 prompt 的相似度条形图 |
-| `config.yaml` | 本次运行的完整配置快照（可复现性，AGENTS.md §7） |
+| `config.yaml` | 自包含配置快照，后续外部 prompt 文件变化不会改写本次配置 |
+| `frame_scores.npz` / `frame_labels.npz` | 完整视频逐帧分数与标签 |
+| `split_manifest.json` / `environment.json` | 训练/验证视频划分、运行依赖和设备 |
 
 解释文本回答「为什么这个视频是异常的」：取相似度最高的异常 prompt 作为原因，
 例如 **“该视频段（起始帧 512）被判定为异常，因为画面语义与 `a person fighting`
 (sim=0.31) 最接近……”**。底层模型输出的张量契约见 `models/outputs.py`：
-`frame_score (B,T)`、`clip_score (B,)`、`embedding (B,D_f)`；zero-shot 路径
+`frame_score (B,T)`、`anomaly_score (B,)`（兼容 `clip_score`）、`embedding (B,D_f)`、
+`explanation`（模型前向可为 None，评估时生成模板解释）；`output.to_dict()` 保留梯度。
+zero-shot 路径
 （`eval/zero_shot.py`）额外按 AGENTS.md §4 汇总 `anomaly_score` / `frame_score` /
 `embedding` / `explanation` 四个字段。
 
@@ -205,7 +261,7 @@ python tools/extract_video_features.py --video-dir ./data/Avenue_Dataset/testing
 
 ```bash
 python scripts/visualize_demo.py --config configs/experiment.yaml \
-    --ckpt checkpoints/exp01/best.pt --videos 01 06 18 --out results/demo
+    --ckpt checkpoints/baseline_v2/best.pt --videos 01 06 18 --out results/demo
 ```
 
 | 产物（`results/demo/`） | 内容 |
@@ -246,7 +302,7 @@ python train.py --config configs/experiment.yaml --run-name fusion_crossattn
 ```
 
 `scripts/prompt_comparison.py` 会把多组 prompt 实验汇总成 markdown 表，当前仓库
-示例（zero-shot, frozen CLIP, Avenue testing）：
+历史 v1 示例（zero-shot, frozen CLIP, Avenue testing，运动伪标签；不能作为官方异常检测成绩）：
 
 | experiment | #prompts | Frame AUC | Video AUC |
 |---|---|---|---|
@@ -273,13 +329,19 @@ PyTorch / dataloader shuffle），seed 来自 `configs/experiment.yaml: seed`。
 数据路径由 `configs/experiment.yaml` 的 `data.video_path` / `data.mask_path` 显式控制，
 不再写死 `training_videos` / `testing_videos`：
 
-- **`video_path`（必填）**：视频目录。未填写 → 直接报错。
+- **`video_path`（必填）**：视频目录（按 split 显式声明，见 `data.train` / `data.test`）。
+  未填写 → 直接报错。
 - **`mask_path`（可选）**：GT 二值 mask 目录（如 `ground_truth/testing_label_mask`）。
   **未填写 → 该目录下所有视频视为正常视频**（帧标签全 0，配合 loss 的
   `skip_bce_when_no_pos` 做无监督训练）。
 - mask 文件命名约定：与视频 stem 匹配，优先 `{stem}_label.mat`，其次 `{stem}.mat`；
   mat 文件内变量名为 **`volLabel`**（不是 `vol`），形状为 `(1, N)` 的 object 数组，
   每格一帧 `(H, W)` 二值 mask。
+- **`frame_label_mode`（默认 `pixel`）**：`pixel` 直接用二值 mask 派生帧标签；
+  `motion_diff` 用帧间差运动伪标签（VAD 经典 baseline，**学术结论请使用真实 mask**）；
+  `official` 读取官方 mat 标注派生的帧标签缓存。
+- pixel 模式发现灰度视频帧伪装成 mask 会直接报错，防止生成全部为异常的错误标签。
+  特征/标签缓存路径严格遵守 frame_label_mode，pixel 模式不会读取运动伪标签缓存。
 
 ### GPU 主机
 
@@ -287,13 +349,12 @@ PyTorch / dataloader shuffle），seed 来自 `configs/experiment.yaml: seed`。
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
 
-### CPU 主机
+### CPU / 核显主机
 
-在 `.env` 中切换为 CPU 镜像：
+同一镜像直接运行即可，不加 gpu 覆盖层（容器内 `torch.cuda.is_available()` 自动为 `False`）：
 
 ```bash
-sed -i 's|^BASE_IMAGE=.*|BASE_IMAGE=pytorch/pytorch:2.3.1-cpu|' .env
-docker compose build
+docker compose up -d
 ```
 
 ## 数据集
@@ -310,6 +371,8 @@ data/
 └── Avenue_Dataset/          # 从官网下载后解压到这里
     ├── training_videos/     # 16 个训练视频 (.avi)
     ├── testing_videos/      # 21 个测试视频 (.avi)
+    ├── training_vol/        # (可选) 16 个 vol (.mat)，本仓库附件实际为灰度帧体
+    ├── testing_vol/         # (可选) 21 个 vol (.mat)，不能作为二值异常真值
     └── ground_truth/
         ├── testing_label_mask/   # 21 个官方 GT 二值 mask ({id}_label.mat, 变量 volLabel)
         └── ...
@@ -378,8 +441,10 @@ vlm_ws/
 ├── tests/                   # 冒烟测试（配置 / 极性 / 指标 / forward / loss）
 ├── pytest.ini               # pytest 配置（pythonpath = 项目根）
 ├── .github/workflows/ci.yml # CI：push / PR 自动跑 pytest
+├── .github/workflows/docker-publish.yml # 镜像自动构建并推送 Docker Hub
 ├── Dockerfile               # 镜像构建文件
-├── docker-compose.yml       # 开发容器编排
+├── docker-compose.yml       # 开发容器编排（pull 预构建镜像）
+├── docker-compose.build.yml # 本地重建覆盖层
 ├── docker-compose.gpu.yml   # GPU 覆盖配置
 ├── .env.example             # 环境变量模板
 ├── .devcontainer/           # VS Code Dev Container 配置
@@ -394,6 +459,16 @@ vlm_ws/
 ```bash
 pytest -q
 ```
+
+GPU 与本地 Avenue 缓存的额外检查（不会在普通 CI 中运行）：
+
+```bash
+VLM_REAL_INTEGRATION=1 HF_HUB_OFFLINE=1 python -m pytest -q tests/test_real_pipeline.py
+```
+
+新增回归覆盖视频隔离、matcher 参数更新、全正常 batch 分类梯度、标签模式隔离、
+运动标签跨 chunk 边界、真实 frame_indices 聚合、续训 RNG 恢复、实验矩阵失败状态。
+GPU 检查验证像素/缓存特征一致及 AMP 训练→验证→断点恢复。
 
 覆盖点（`tests/test_smoke.py`）：
 
@@ -423,7 +498,8 @@ tensorboard --logdir logs --host 0.0.0.0 --port 6006
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `BASE_IMAGE` | `pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime` | 基础镜像 |
+| `VLM_IMAGE` | `zgzdocker/vlm-ws:dev` | `docker compose up` 拉取的镜像地址 |
+| `BASE_IMAGE` | `pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime` | 本地构建用基础镜像（仅 `docker-compose.build.yml`） |
 | `LOCAL_UID:GID` | `1000:1000` | 容器内用户 ID |
 | `SHM_SIZE` | `16gb` | 共享内存大小 |
 | `JUPYTER_PORT` | `8888` | Jupyter 端口映射 |

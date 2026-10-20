@@ -6,8 +6,10 @@ This project uses Docker Compose for a reproducible research environment.
 
 - `Dockerfile`: builds the base image with PyTorch, video libraries, and common VLM research dependencies.
 - `docker-compose.yml`: starts the default development container, mounts the current repo, and exposes common ports.
+- `docker-compose.build.yml`: local rebuild override; adds the `build:` section back after you change the Dockerfile or requirements.
 - `docker-compose.gpu.yml`: optional GPU override for NVIDIA hosts.
 - `.env.example`: editable environment variables for user ID, ports, and shared memory.
+- `.github/workflows/docker-publish.yml`: builds and pushes `zgzdocker/vlm-ws` to Docker Hub on pushes to `main`.
 - `requirements/base.txt`: core runtime dependencies for training and evaluation.
 - `requirements/dev.txt`: development extras layered on top of the base dependencies.
 - `scripts/docker/entrypoint.sh`: creates runtime directories before the container command starts.
@@ -35,25 +37,13 @@ ignored by the CLI).
    cp .env.example .env
    ```
 
-2. Optional: switch to a smaller CPU base image if you do not need CUDA:
-
-   ```bash
-   sed -i 's|^BASE_IMAGE=.*|BASE_IMAGE=pytorch/pytorch:2.3.1-cpu|' .env
-   ```
-
-3. Build the image:
-
-   ```bash
-   docker compose build
-   ```
-
-4. Start the container:
+2. Start the container (the prebuilt image `zgzdocker/vlm-ws:dev` is pulled automatically):
 
    ```bash
    docker compose up -d
    ```
 
-5. Open a shell in the container:
+3. Open a shell in the container:
 
    ```bash
    docker compose exec vlm-dev zsh
@@ -61,32 +51,37 @@ ignored by the CLI).
 
 The host terminal can be `zsh` or `bash`. The container stays alive with `sleep infinity`, and you open an interactive shell with `docker compose exec vlm-dev zsh`.
 
+To rebuild the image locally after changing `Dockerfile` or `requirements/`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml build
+```
+
 ## GPU Start
 
-If your host has NVIDIA Container Toolkit installed and `BASE_IMAGE` is a CUDA image, use:
+If your host has NVIDIA Container Toolkit installed, use:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
 
+CPU / integrated-graphics hosts use plain `docker compose up -d` with the same image; CUDA is simply unavailable inside the container.
+
 ## Troubleshooting
 
-If the build fails with errors such as `failed to fetch anonymous token` or `connection reset by peer`, the problem is usually network or proxy access to Docker Hub rather than the project files.
+If the pull fails with errors such as `failed to fetch anonymous token` or `connection reset by peer`, the problem is usually network or proxy access to Docker Hub rather than the project files.
 
 Common fixes:
 
 ```bash
 # Retry after network/proxy recovers
-docker compose build
+docker compose pull
 
-# If you use a local proxy, ensure it is running and stable first
-
-# If you do not need GPU, switch to the smaller CPU image in .env
-sed -i 's|^BASE_IMAGE=.*|BASE_IMAGE=pytorch/pytorch:2.3.1-cpu|' .env
-docker compose build
+# Build locally instead of pulling
+docker compose -f docker-compose.yml -f docker-compose.build.yml build
 ```
 
-If some layers finished downloading before the failure, Docker will usually reuse the completed layers on the next build attempt.
+If the local build fails, Docker usually reuses completed layers on the next attempt.
 
 ## Common Commands
 
