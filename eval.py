@@ -80,11 +80,7 @@ def main() -> None:
             "本次运行请关注 zs_* 零样本 CLIP 保底指标（训练前的 baseline）。"
         )
 
-    # prompt 极性（零样本保底需要；与 Trainer 内部同一套规则）
-    polarity = build_prompt_polarity(
-        model.prompt_processor.process(), cfg.prompt,
-    ).to(device)
-
+    # prompt 极性在 evaluate_videos 内部由 cfg 计算（含长度校验），无需在此重复
     results = evaluate_videos(
         model=model,
         matcher=matcher,
