@@ -140,6 +140,10 @@ CPU 与 CUDA 镜像共用研究依赖，分别安装 CPU-only / CUDA PyTorch。
 或 `./scripts/dev.sh gpu build` 重建。完整平台范围、迁移方式和权限说明见
 [容器文档](docs/container.md)。
 
+Web UI 使用 `./scripts/dev.sh cpu web up -d`，NVIDIA 主机改用 `gpu`，
+浏览器打开 `http://127.0.0.1:8000`。新标签尚未发布时先运行对应的 `build`。
+页面功能和迁移方式见 [Web Studio](docs/webapp.md)，后续同步上游见 [分支说明](docs/branches.md)。
+
 ### 阶段 1 · 数据与标注
 
 1. 按「[数据集](#数据集)」一节把 CUHK Avenue 放入 `data/Avenue_Dataset/`。
@@ -400,9 +404,7 @@ vlm_ws/
 │   ├── temporal.py          # TemporalIdentity / TemporalTransformer
 │   ├── head.py              # 异常检测头（frame_logits + frame_score）
 │   └── outputs.py           # 各模块统一的 frozen dataclass 输出
-├── data/                    # 旧数据模块（向后兼容 re-export）
-│   ├── avenue_dataset.py    # Avenue 数据集类
-│   └── dataloader.py        # DataLoader 工厂函数
+├── data/                    # 数据存放目录；__init__.py 保留兼容导出
 ├── datasets/                # 新数据模块（推荐）
 │   ├── video_dataset.py     # 原始像素 Dataset（官方 GT volLabel mask）
 │   ├── feature_dataset.py   # 预提取特征 Dataset（训练提速 ~10×）
@@ -428,6 +430,8 @@ vlm_ws/
 │   └── extract_text_features.py
 ├── train.py                 # 训练入口（配置驱动，一条命令闭环）
 ├── eval.py                  # 评估入口（加载 checkpoint 出指标+解释+图）
+├── run_web.py               # Web Studio 入口（数据集、训练、验证、对比）
+├── webapp/                  # 模块化 Web UI 与任务管理
 ├── configs/                 # 实验配置文件
 │   ├── experiment.yaml      # 训练/模型/数据/路径
 │   └── prompts.yaml         # prompt 词汇表与极性关键词

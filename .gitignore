@@ -75,3 +75,10 @@ node_modules/
 *~
 .vscode/
 .directory
+
+# ── Web Studio runtime ───────────────────────────────────────
+data/uploads/
+configs/generated/
+logs/web_jobs/
+.npm-cache/
+.npm-logs/

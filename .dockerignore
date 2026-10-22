@@ -24,3 +24,4 @@ data/labels*/
 data/ground_truth_demo.zip
 .cache/
 node_modules/
+webapp_ws/

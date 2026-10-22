@@ -8,6 +8,7 @@ Usage: ./scripts/dev.sh cpu|gpu COMMAND [ARGS...]
 
   prepare     Create .env if needed and synchronize host UID/GID (no container start)
   up -d       Start the development container
+  web up -d   Start Web Studio with the selected CPU or CUDA image
   build       Build the selected CPU or CUDA image locally
   shell       Open zsh in the running development container
   check       Run a one-off environment/permissions/device check
@@ -31,6 +32,20 @@ case "${action}" in
   -h|--help|help) usage; exit 0 ;;
 esac
 shift 2
+
+web_mode=0
+if [[ "${action}" == web ]]; then
+  web_mode=1
+  action="${1:-up}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  else
+    set -- -d
+  fi
+  case "${action}" in
+    -h|--help|help) usage; exit 0 ;;
+  esac
+fi
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${project_dir}"
@@ -81,6 +96,9 @@ if [[ "${mode}" == gpu ]]; then
 fi
 if [[ "${VLM_HOST_TOOLS:-0}" == 1 ]]; then
   compose+=(-f "${project_dir}/docker-compose.host-tools.yml")
+fi
+if [[ "${web_mode}" == 1 ]]; then
+  compose+=(-f "${project_dir}/docker-compose.web.yml")
 fi
 
 # Let Compose parse dotenv interpolation instead of executing the file as shell.

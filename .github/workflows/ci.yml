@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, dev, "feat/**"]
+    branches: [main, dev, "feat/**", "merge/**"]
   pull_request:
     branches: [main, dev]
 
@@ -50,3 +50,5 @@ jobs:
           docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.gpu.yml config --quiet
           docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.host-tools.yml config --quiet
           docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.host-tools.yml config --quiet
+          docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.web.yml config --quiet
+          docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.web.yml config --quiet

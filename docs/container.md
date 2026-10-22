@@ -54,6 +54,21 @@ GPU 模式遵循 [Docker GPU 设备预留](https://docs.docker.com/compose/how-t
 `check` 启动一次性容器，检查核心导入、实际 CPU/CUDA 张量计算、HOME 和实验输出目录写权限。
 GPU 检查在 CUDA 不可用时返回非零，不会静默按 CPU 通过。
 
+## Web Studio
+
+Web UI 直接使用所选的 CPU/CUDA 开发镜像，在同一服务上增加 Web 启动配置：
+
+```bash
+./scripts/dev.sh cpu web up -d
+# NVIDIA 使用 ./scripts/dev.sh gpu web up -d
+# 浏览器打开 http://127.0.0.1:8000
+./scripts/dev.sh cpu web logs -f
+./scripts/dev.sh cpu web down
+```
+
+新镜像标签尚未发布时先运行对应的 `build`。端口由 `WEB_PORT` 控制，
+数据与命令行共用；详见 [Web Studio](webapp.md)。
+
 ## 构建、测试和停止
 
 ```bash

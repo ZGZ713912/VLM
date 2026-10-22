@@ -52,6 +52,8 @@ def main() -> None:
                         help="Override cfg.train.epochs (smoke tests)")
     parser.add_argument("--run-name", default=None,
                         help="Override cfg.paths.run_name")
+    parser.add_argument("--skip-eval", action="store_true",
+                        help="Skip the final test-set evaluation")
     args = parser.parse_args()
 
     # ── 1. 配置 ──────────────────────────────────────────────
@@ -129,6 +131,10 @@ def main() -> None:
         trainer.fit()
 
     # ── 5. 视频级评估（用最优 checkpoint 的权重）────────────────
+    if args.skip_eval:
+        log.info("Skipping test-set evaluation (--skip-eval)")
+        return
+
     best_ckpt = Path(cfg.paths.checkpoint_dir) / str(cfg.paths.run_name) / "best.pt"
     if best_ckpt.is_file():
         from utils.io import load_checkpoint
