@@ -1,0 +1,33 @@
+services:
+  vlm-web:
+    image: ${VLM_IMAGE:-vlm-ws:dev}
+    container_name: vlm-web-studio
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    init: true
+    working_dir: /workspace/vlm_ws_web
+    stdin_open: true
+    tty: true
+    shm_size: "${SHM_SIZE:-2gb}"
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      HOME: /tmp/devhome
+      PYTHONPATH: /workspace/vlm_ws_web
+      MPLCONFIGDIR: /tmp/devhome/.config/matplotlib
+      PIP_CACHE_DIR: /tmp/devhome/.cache/pip
+      HF_HOME: /tmp/devhome/.cache/huggingface
+      TRANSFORMERS_CACHE: /tmp/devhome/.cache/huggingface/transformers
+      TORCH_HOME: /tmp/devhome/.cache/torch
+    volumes:
+      - .:/workspace/vlm_ws_web
+      - ../data:/workspace/vlm_ws_web/data
+      - ../results:/workspace/vlm_ws_web/results
+      - ../checkpoints:/workspace/vlm_ws_web/checkpoints
+      - ../logs:/workspace/vlm_ws_web/logs
+      - vlm_ws_dev-home:/tmp/devhome
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8000}:8000"
+    command: python run_web.py --host 0.0.0.0 --port 8000
+
+volumes:
+  vlm_ws_dev-home:
+    external: true
