@@ -54,7 +54,7 @@ python scripts/run_experiments.py --output results/stage2_verified_sweep
 | 依赖 | 说明 |
 |---|---|
 | Docker Engine 24+ | 容器运行时 |
-| Docker Compose v2 | 多容器编排 |
+| Docker Compose 插件 2.24+ | 开发容器编排 |
 | NVIDIA Container Toolkit | **可选**，仅 GPU 训练需要 |
 
 ## 快速启动
@@ -64,21 +64,24 @@ python scripts/run_experiments.py --output results/stage2_verified_sweep
 git clone <repo-url>
 cd vlm_ws
 
-# 2. 创建环境变量文件
-cp .env.example .env
+# 2. CPU 开发：自动创建 .env 并匹配宿主 UID/GID
+./scripts/dev.sh cpu up -d
+./scripts/dev.sh cpu check
 
-# 3. 启动容器（镜像自动从 Docker Hub 拉取 zgzdocker/vlm-ws:dev，首次约 1-5 分钟）
-docker compose up -d
-
-# 4. 进入开发环境
-docker compose exec vlm-dev zsh
+# 3. 进入开发环境
+./scripts/dev.sh cpu shell
 ```
 
-镜像由 GitHub Actions 自动构建并推送（`.github/workflows/docker-publish.yml`）。
-仅当修改了 `Dockerfile` 或 `requirements/` 时需要本地重建：
+Intel/AMD 共用 amd64 镜像，ARM64 使用同一 `:cpu` 标签中的 arm64 镜像。
+不同 Linux 发行版共用同一套配置；NVIDIA x86-64 主机将命令中的 `cpu` 换成 `gpu`，
+使用单独的 `:cuda12.1` 镜像，并先安装驱动和 NVIDIA Container Toolkit。
+VS Code 的 `Reopen in Container` 可选择 CPU 或 NVIDIA CUDA 配置。
+
+镜像由 GitHub Actions 构建、测试和发布。新标签尚未发布或修改依赖后，可本地构建：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.build.yml build
+./scripts/dev.sh cpu build       # NVIDIA 使用 gpu build
+./scripts/dev.sh cpu up -d
 ```
 
 ## 异常视频检测完整流程
@@ -127,15 +130,15 @@ Avenue 视频 (B,T,C,H,W) ──┐
 ### 阶段 0 · 环境准备
 
 ```bash
-cp .env.example .env          # 首次
-docker compose up -d          # 自动 pull 预构建镜像，首次约 1-5 分钟
-docker compose exec vlm-dev zsh
+./scripts/dev.sh cpu up -d    # NVIDIA 主机使用 gpu
+./scripts/dev.sh cpu check
+./scripts/dev.sh cpu shell
 ```
 
-GPU 主机使用 `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`；
-CPU / 核显主机直接 `docker compose up -d`（同一镜像，无需改动）。
-修改 `Dockerfile` / `requirements/` 后本地重建：
-`docker compose -f docker-compose.yml -f docker-compose.build.yml build`。
+CPU 与 CUDA 镜像共用研究依赖，分别安装 CPU-only / CUDA PyTorch。
+修改 `Dockerfile` / `requirements/` 后，使用对应的 `./scripts/dev.sh cpu build`
+或 `./scripts/dev.sh gpu build` 重建。完整平台范围、迁移方式和权限说明见
+[容器文档](docs/container.md)。
 
 ### 阶段 1 · 数据与标注
 
@@ -338,15 +341,17 @@ PyTorch / dataloader shuffle），seed 来自 `configs/experiment.yaml: seed`。
 ### GPU 主机
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+./scripts/dev.sh gpu up -d
+./scripts/dev.sh gpu check
 ```
 
 ### CPU / 核显主机
 
-同一镜像直接运行即可，不加 gpu 覆盖层（容器内 `torch.cuda.is_available()` 自动为 `False`）：
+默认使用 CPU-only 镜像，支持 Intel/AMD x86-64 与 ARM64：
 
 ```bash
-docker compose up -d
+./scripts/dev.sh cpu up -d
+./scripts/dev.sh cpu check
 ```
 
 ## 数据集
@@ -421,9 +426,11 @@ vlm_ws/
 ├── results/                 # 实验结果（运行时生成）
 ├── requirements/            # Python 依赖
 │   ├── base.txt             # 核心依赖（含标注工具 flask）
+│   ├── torch.txt            # CPU/CUDA 共用的 PyTorch 版本
 │   ├── dev.txt              # 开发依赖（Jupyter、pytest 等）
 │   └── ci.txt               # CI 依赖（base + pytest，不含 Jupyter）
 ├── scripts/
+│   ├── dev.sh               # CPU/GPU 统一启动、构建、检查入口
 │   ├── zero_shot_test.py    # zero-shot 基线入口
 │   ├── prompt_comparison.py # prompt 消融实验
 │   ├── visualize_demo.py    # 检测效果 → MP4/GIF 可视化演示
@@ -433,9 +440,9 @@ vlm_ws/
 ├── .github/workflows/ci.yml # CI：push / PR 自动跑 pytest
 ├── .github/workflows/docker-publish.yml # 镜像自动构建并推送 Docker Hub
 ├── Dockerfile               # 镜像构建文件
-├── docker-compose.yml       # 开发容器编排（pull 预构建镜像）
-├── docker-compose.build.yml # 本地重建覆盖层
-├── docker-compose.gpu.yml   # GPU 覆盖配置
+├── docker-compose.yml       # 通用 CPU 开发运行配置
+├── docker-compose.gpu.yml   # CUDA 镜像和 NVIDIA 设备覆盖配置
+├── docker-compose.host-tools.yml # 可选个人工具配置挂载
 ├── .env.example             # 环境变量模板
 ├── .devcontainer/           # VS Code Dev Container 配置
 ├── docs/container.md        # 容器环境详细文档
@@ -488,30 +495,29 @@ tensorboard --logdir logs --host 0.0.0.0 --port 6006
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `VLM_IMAGE` | `zgzdocker/vlm-ws:dev` | `docker compose up` 拉取的镜像地址 |
-| `BASE_IMAGE` | `pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime` | 本地构建用基础镜像（仅 `docker-compose.build.yml`） |
-| `LOCAL_UID:GID` | `1000:1000` | 容器内用户 ID |
-| `SHM_SIZE` | `16gb` | 共享内存大小 |
+| `VLM_CPU_IMAGE` | `zgzdocker/vlm-ws:cpu` | CPU 多架构镜像；可固定为提交标签或 digest |
+| `VLM_CUDA_IMAGE` | `zgzdocker/vlm-ws:cuda12.1` | NVIDIA x86-64 镜像 |
+| `CPU_BASE_IMAGE` | `python:3.10-slim-bookworm` | CPU 本地构建基础镜像 |
+| `CUDA_BASE_IMAGE` | `pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime` | CUDA 本地构建基础镜像 |
+| `LOCAL_UID` / `LOCAL_GID` | 启动脚本匹配宿主用户 | 容器内用户 ID，避免输出文件归 root |
+| `SHM_SIZE` | `2gb` | 容器共享内存大小 |
+| `BIND_ADDRESS` | `127.0.0.1` | Jupyter / TensorBoard 绑定地址 |
 | `JUPYTER_PORT` | `8888` | Jupyter 端口映射 |
 | `TENSORBOARD_PORT` | `6006` | TensorBoard 端口映射 |
-| `HOST_OPENCODE_CONFIG` | `$HOME/.config/opencode` | 宿主机 opencode 配置挂载路径 |
-| `HOST_OPENCODE_AUTH` | `$HOME/.local/share/opencode/auth.json` | 宿主机 opencode 认证文件挂载路径 |
-| `HOST_AGENTS_DIR` | `$HOME/.agents` | 宿主机全局 Agent skills 挂载路径 |
+| `INSTALL_OPTIONAL_SHELL_TOOLS` | `0` | 本地构建时是否安装个人 CLI 工具 |
 
 在 `.env` 文件中修改即可。
 
 ## 容器内 opencode
 
-镜像会随 `INSTALL_OPTIONAL_SHELL_TOOLS=1` 自动安装 `opencode-ai`，并把宿主机的
-`~/.config/opencode`、`~/.local/share/opencode/auth.json` 和 `~/.agents` 绑定挂载进
-容器（`auth.json` 先只读挂载到 `/opt/opencode-host/`，由入口脚本复制到容器 HOME）。
-因此容器内直接执行 `opencode` 即可复用宿主机的模型 /provider 配置与登录态；会话
-数据库保存在容器卷内（`/tmp/devhome`），不会与宿主机的 SQLite 冲突。
+团队默认容器不依赖个人 CLI、配置或凭据。需要 opencode 时，以
+`INSTALL_OPTIONAL_SHELL_TOOLS=1` 构建个人镜像，再显式启用个人挂载；操作见
+[容器文档](docs/container.md#可选个人开发工具)。会话数据库仍保存在容器 HOME 卷内。
 
 ## 提醒
 
 - **框架：** PyTorch 2.3, OpenCLIP, HuggingFace Transformers
-- **视频处理：** OpenCV, Decord
+- **视频处理：** OpenCV；Decord 为可选后端
 - **语言模型：** CLIP (ViT + Text Transformer)
 - **容器：** Docker, Docker Compose
 - **依赖注入：** OmegaConf, PyYAML

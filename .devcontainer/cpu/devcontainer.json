@@ -1,12 +1,14 @@
 {
-  "name": "vlm-ws",
+  "name": "vlm-ws (CPU)",
+  "initializeCommand": ["bash", "${localWorkspaceFolder}/scripts/dev.sh", "cpu", "prepare"],
   "dockerComposeFile": [
-    "../docker-compose.yml"
+    "../../docker-compose.yml"
   ],
   "service": "vlm-dev",
   "workspaceFolder": "/workspace/vlm_ws",
   "shutdownAction": "stopCompose",
   "overrideCommand": false,
+  "updateRemoteUserUID": false,
   "remoteEnv": {
     "SHELL": "/usr/bin/zsh"
   },

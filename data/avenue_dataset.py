@@ -21,8 +21,6 @@ import numpy as np
 import torch
 # F 里提供了插值缩放等常用张量函数。
 import torch.nn.functional as F
-# decord 是另一个视频读取后端，通常批量读取速度更快。
-from decord import VideoReader
 # loadmat 用于读取 .mat 标注文件，whosmat 用于只查看 mat 文件中的变量信息。
 from scipy.io import loadmat, whosmat
 # Dataset 是 PyTorch 数据集基类。
@@ -170,6 +168,9 @@ def _build_frame_indices(
 
 # 使用 decord 按给定下标一次性批量读取多帧。
 def _read_frames_with_decord(video_path: Path, frame_indices: np.ndarray) -> np.ndarray:
+    # 默认镜像使用 OpenCV；仅在选用 decord 时加载这个可选依赖。
+    from decord import VideoReader
+
     reader = VideoReader(str(video_path), num_threads=1)  # 创建 decord 视频读取器。
     frames = reader.get_batch(frame_indices.tolist()).asnumpy()  # 批量取帧，并转成 NumPy 数组。
     return frames  # 返回形状通常为 (T, H, W, C) 的 RGB 帧数据。

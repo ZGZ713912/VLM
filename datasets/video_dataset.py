@@ -12,7 +12,6 @@ import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
-from decord import VideoReader
 from scipy.io import loadmat, whosmat
 from torch.utils.data import Dataset
 
@@ -205,6 +204,9 @@ def _build_frame_indices(
 # ═════════════════════════════════════════════════════════════════
 
 def _read_frames_decord(video_path: Path, indices: np.ndarray) -> np.ndarray:
+    # Optional dependency; the portable image uses the OpenCV fallback.
+    from decord import VideoReader
+
     reader = VideoReader(str(video_path), num_threads=1)
     return reader.get_batch(indices.tolist()).asnumpy()  # (T, H, W, C)
 

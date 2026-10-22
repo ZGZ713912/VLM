@@ -17,6 +17,8 @@ env/
 
 # ── Environment & secrets ───────────────────────────────────
 .env
+.env.*
+!.env.example
 *.secret
 *.key
 
