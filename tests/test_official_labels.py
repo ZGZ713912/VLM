@@ -85,7 +85,7 @@ def test_prepare_and_both_input_paths_no_gray_vol_dependency(official_data):
     meta = prepare_labels(archive, root, out)
     assert meta["num_frames"] == 8
     assert meta["num_anomaly_frames"] == 3
-    kwargs = dict(root=root, split="testing", clip_length=4, clip_step=4,
+    kwargs = dict(video_dir=root / "testing_videos", split="testing", clip_length=4, clip_step=4,
                   frame_label_mode="official", label_dir=out / "testing")
     pixel = VideoDataset(**kwargs, video_backend="opencv", image_size=(8, 8), resize_mask_to_video=True)
     cached = FeatureDataset(features, **kwargs)
@@ -107,7 +107,7 @@ def test_source_and_checksum_guard(official_data):
     path = out / "testing"
     torch.save(torch.zeros(8, dtype=torch.long), path / "01.pt")
     with pytest.raises(ValueError, match="checksum"):
-        FeatureDataset(features, root, split="testing", frame_label_mode="official", label_dir=path)
+        FeatureDataset(features, root / "testing_videos", split="testing", frame_label_mode="official", label_dir=path)
     meta = json.loads((path / "manifest.json").read_text())
     meta["label_mode"] = "motion_diff"
     (path / "manifest.json").write_text(json.dumps(meta))

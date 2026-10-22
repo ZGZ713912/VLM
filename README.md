@@ -143,12 +143,13 @@ CPU 与 CUDA 镜像共用研究依赖，分别安装 CPU-only / CUDA PyTorch。
 ### 阶段 1 · 数据与标注
 
 1. 按「[数据集](#数据集)」一节把 CUHK Avenue 放入 `data/Avenue_Dataset/`。
-2. 确认标注模式（**重要**，见下方 ⚠️ 说明）：
-   - 持有**官方二值 mask** → `configs/experiment.yaml` 设 `data.frame_label_mode: pixel`；
-   - 使用本仓库自带降采样灰度 `vol` → 保持默认 `data.frame_label_mode: motion_diff`。
+2. 确保 GT mask 文件存在于对应目录（如 `data/Avenue_Dataset/ground_truth/testing_label_mask`），
+   并确认标注模式（**重要**，见下方 ⚠️ 说明）：
+   - 持有**官方二值 mask**（变量名 `volLabel`）→ 保持默认 `data.frame_label_mode: pixel`；
+   - 只有降采样灰度 `vol` 文件 → 可设 `data.frame_label_mode: motion_diff`，用运动伪标签跑通流程。
 
-`motion_diff` 模式需要先生成运动伪标签（一次性，训练/评估会自动从
-`data/labels/{split}/` 读取）：
+`motion_diff` / `official` 模式需要先生成 / 准备帧标签缓存（一次性，训练与评估会从
+`data/labels_v2/{split}/` 读取）：
 
 ```bash
 python tools/extract_motion_labels.py --root ./data --split training --out ./data/labels_v2 --threshold 3.0
@@ -163,16 +164,16 @@ python tools/extract_motion_labels.py --root ./data --split testing  --out ./dat
 
 ```bash
 # 单次 zero-shot（--prompts: label | scene | contrast | all）
-python scripts/zero_shot_test.py --config configs/experiment.yaml \
-    --prompts scene --output results/zero_shot_test.json
+python scripts/zero_shot_test.py --config configs/experiment.yaml --prompts scene
 
 # 多 prompt 批量消融（一次跑多组，输出 json + markdown 表）
 python scripts/prompt_comparison.py --config configs/experiment.yaml \
     --experiments label_only scene_only contrast_only all_types
 ```
 
-产物：`results/zero_shot_test.json`、`results/prompt_comparison.{json,md}`，
-以及每个实验目录下的 `zero_shot_metrics.json` / `zero_shot_explanations.json` / 热力图。
+产物：每次运行的所有结果都落在 `results/zero_shot_{prompts}/`（`summary.json` +
+`zero_shot_metrics.json` / `zero_shot_explanations.json` / `zero_shot_plots/` 热力图），
+以及 `results/prompt_comparison.{json,md}` 与各实验子目录。
 
 > 该路径完全跳过 `VLMModel`，与微调结果使用**相同的滑窗聚合与三级指标**，
 > 因此两者可直接对比。`eval.zero_shot` 还返回 AGENTS.md §4 要求的
@@ -326,17 +327,24 @@ results/{run_name}/              # metrics / explanations / plots / config.yaml
 PyTorch / dataloader shuffle），seed 来自 `configs/experiment.yaml: seed`。
 每次运行都会把最终配置写入 `results/{run_name}/config.yaml`，保证实验可追溯。
 
-### ⚠️ 关于 Avenue 数据集标注（重要）
+### ⚠️ 关于数据集路径与 GT 标注（重要）
 
-本仓库 `data/Avenue_Dataset/*_vol/*.mat` 中的 `vol` 变量经检测**实际是降采样的灰度视频帧，
-而不是二值异常 mask**（与视频帧相关系数 ≈ 0.999）。因此：
+数据路径由 `configs/experiment.yaml` 的 `data.video_path` / `data.mask_path` 显式控制，
+不再写死 `training_videos` / `testing_videos`：
 
-- **本仓库默认** `frame_label_mode: motion_diff`（`configs/experiment.yaml`）：基于帧间差的
-  运动伪标签，VAD 经典 baseline 之一，配合自带数据即可跑通流程，**学术结论请使用真实 mask**。
-- 若你持有**官方二值 mask**：把 `configs/experiment.yaml` 改为 `frame_label_mode: pixel`
-  后再训练/评估，无需其他改动。
+- **`video_path`（必填）**：视频目录（按 split 显式声明，见 `data.train` / `data.test`）。
+  未填写 → 直接报错。
+- **`mask_path`（可选）**：GT 二值 mask 目录（如 `ground_truth/testing_label_mask`）。
+  **未填写 → 该目录下所有视频视为正常视频**（帧标签全 0，配合 loss 的
+  `skip_bce_when_no_pos` 做无监督训练）。
+- mask 文件命名约定：与视频 stem 匹配，优先 `{stem}_label.mat`，其次 `{stem}.mat`；
+  mat 文件内变量名为 **`volLabel`**（不是 `vol`），形状为 `(1, N)` 的 object 数组，
+  每格一帧 `(H, W)` 二值 mask。
+- **`frame_label_mode`（默认 `pixel`）**：`pixel` 直接用二值 mask 派生帧标签；
+  `motion_diff` 用帧间差运动伪标签（VAD 经典 baseline，**学术结论请使用真实 mask**）；
+  `official` 读取官方 mat 标注派生的帧标签缓存。
 - pixel 模式发现灰度视频帧伪装成 mask 会直接报错，防止生成全部为异常的错误标签。
-  特征路径严格遵守 frame_label_mode，pixel 模式不会读取运动伪标签缓存。
+  特征/标签缓存路径严格遵守 frame_label_mode，pixel 模式不会读取运动伪标签缓存。
 
 ### GPU 主机
 
@@ -368,8 +376,11 @@ data/
 └── Avenue_Dataset/          # 从官网下载后解压到这里
     ├── training_videos/     # 16 个训练视频 (.avi)
     ├── testing_videos/      # 21 个测试视频 (.avi)
-    ├── training_vol/        # 16 个 vol (.mat)，本仓库附件实际为灰度帧体
-    └── testing_vol/         # 21 个 vol (.mat)，不能作为二值异常真值
+    ├── training_vol/        # (可选) 16 个 vol (.mat)，本仓库附件实际为灰度帧体
+    ├── testing_vol/         # (可选) 21 个 vol (.mat)，不能作为二值异常真值
+    └── ground_truth/
+        ├── testing_label_mask/   # 21 个官方 GT 二值 mask ({id}_label.mat, 变量 volLabel)
+        └── ...
 ```
 
 > 数据集文件被 `.gitignore` 排除，不会提交到仓库。
@@ -393,7 +404,7 @@ vlm_ws/
 │   ├── avenue_dataset.py    # Avenue 数据集类
 │   └── dataloader.py        # DataLoader 工厂函数
 ├── datasets/                # 新数据模块（推荐）
-│   ├── video_dataset.py     # 原始像素 Dataset（支持 pixel / motion_diff 标签）
+│   ├── video_dataset.py     # 原始像素 Dataset（官方 GT volLabel mask）
 │   ├── feature_dataset.py   # 预提取特征 Dataset（训练提速 ~10×）
 │   ├── dataloader.py        # DataLoader 工厂函数
 │   └── builders.py          # 配置驱动：自动选 Video/Feature 路径
@@ -412,10 +423,9 @@ vlm_ws/
 │   ├── io.py                # checkpoint / JSON 读写
 │   ├── config.py            # 配置加载（experiment + prompts 合并）
 │   └── visualization.py     # 时序热力图 / prompt 相似度 / attention
-├── tools/                   # 离线特征与标签提取脚本
+├── tools/                   # 离线特征提取脚本
 │   ├── extract_video_features.py
-│   ├── extract_text_features.py
-│   └── extract_motion_labels.py
+│   └── extract_text_features.py
 ├── train.py                 # 训练入口（配置驱动，一条命令闭环）
 ├── eval.py                  # 评估入口（加载 checkpoint 出指标+解释+图）
 ├── configs/                 # 实验配置文件

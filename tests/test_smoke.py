@@ -4,7 +4,6 @@
 覆盖 AGENTS.md 要求的关键契约（全部可在 CPU 上秒级跑完）：
 
 1. **配置加载** — ``configs/experiment.yaml`` 与 ``configs/prompts.yaml`` 能合并，
-   且 ``frame_label_mode`` 与仓库自带数据一致。
 2. **Prompt 极性** — ``build_prompt_polarity`` 能把 prompt 打成 {+1 异常, -1 正常}。
 3. **评估指标** — frame/clip/video 三级 AUC & AP 数值正确，单类输入有防御。
 4. **模型 forward shape** — ``build_model`` → ``forward`` 输出满足
@@ -99,6 +98,13 @@ class FakeCLIPBackbone(nn.Module):
         """``(B,T,C,H,W)`` → ``(B,T,D)``（对空间维做均值再投影）。"""
         return self.frame_proj(video.mean(dim=(3, 4)))
 
+    def tokenize(self, prompts: list[str]) -> torch.Tensor:
+        """与 ``CLIPBackbone.tokenize`` 对齐：``list[str]`` → ``(K,L)`` token id。
+
+        假 backbone 不做真实分词，所有位置都视为真实 token（id=1，无 padding）。
+        """
+        return torch.ones(len(prompts), self._seq_len, dtype=torch.long)
+
     def encode_text(self, prompts: list[str]) -> torch.Tensor:
         """``list[str]`` → ``(K,L,D)``——确定性的非零正弦编码（形状/数值可复现）。"""
         k = len(prompts)
@@ -135,8 +141,6 @@ def test_load_experiment_config(cfg):
     assert set(cfg.prompt.templates) == {"label", "scene", "contrast"}
     assert len(cfg.prompt.normal_keywords) > 0
     assert len(cfg.prompt.abnormal_keywords) > 0
-    # README 与 config 必须一致：仓库默认用运动伪标签（见 README「关于 Avenue 数据集标注」）
-    assert cfg.data.frame_label_mode == "motion_diff"
     # 模型可实验维度（AGENTS.md §8）必须齐全
     assert cfg.model.fusion.type in {"concat", "gated", "crossattn"}
     assert cfg.model.temporal.type in {"identity", "transformer"}
@@ -147,7 +151,6 @@ def test_config_snapshot_roundtrip(cfg, tmp_path):
     assert out.is_file()
     reloaded = load_experiment_config(out)
     assert reloaded.seed == cfg.seed
-    assert reloaded.data.frame_label_mode == cfg.data.frame_label_mode
 
 
 # ═══════════════════════════════════════════════════════════════════

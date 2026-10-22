@@ -68,17 +68,51 @@ def _pool_text(token_emb: torch.Tensor) -> torch.Tensor:
     return F.normalize(token_emb.mean(dim=1), dim=-1)
 
 
-def _accumulate(
+def _scatter_accumulate(
     accum: np.ndarray,
     counts: np.ndarray,
+    indices: np.ndarray,
+    values: np.ndarray,
+) -> None:
+    """把一段 clip 的值按**真实帧下标**散写累加（重叠区域等权平均用）。
+
+    为什么不能按 ``start + j`` 连续写：dataset 侧 clip 第 j 帧对应原视频
+    第 ``indices[j]`` 帧——当 ``clip_stride != 1`` 时二者不等（跨步采样），
+    且边界裁剪（``_build_frame_indices`` 的 clamp）可能产生重复/越界下标。
+    只有按下标散写才能保证分数/标签落回正确的时间坐标；
+    ``np.add.at`` 正确处理重复下标（重复帧的覆盖次数也 +1）。
+
+    Args:
+        accum: ``(N,)`` 累加和数组（按视频总帧数初始化）。
+        counts: ``(N,)`` 每帧被覆盖次数。
+        indices: ``(T,)`` clip 各帧在原视频中的真实下标。
+        values: ``(T,)`` 与 indices 一一对应的值（帧分数或帧标签）。
+    """
+    valid = (indices >= 0) & (indices < len(accum))
+    idx = indices[valid]
+    np.add.at(accum, idx, values[valid])
+    np.add.at(counts, idx, 1.0)
+
+
+def _accumulate_clip(
+    accum: np.ndarray,
+    counts: np.ndarray,
+    batch: dict[str, Any],
+    b: int,
     start: int,
     values: np.ndarray,
 ) -> None:
-    """把一段 clip 的值按帧坐标累加（重叠区域等权平均用）。"""
-    end = min(start + len(values), len(accum))
-    n = end - start
-    accum[start:end] += values[:n]
-    counts[start:end] += 1.0
+    """取出 batch 中第 b 个 clip 的真实帧下标并散写累加。
+
+    Dataset（VideoDataset/FeatureDataset）在 ``frame_indices`` 里提供每个
+    clip 帧在原视频中的真实下标；自定义 dataset 未提供时退化为
+    ``start + j`` 连续写入（等价于旧的 clip_stride=1 假设）。
+    """
+    if batch.get("frame_indices", None) is not None:
+        indices = batch["frame_indices"][b].cpu().numpy().astype(np.int64)
+    else:
+        indices = start + np.arange(len(values), dtype=np.int64)
+    _scatter_accumulate(accum, counts, indices, values)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -230,8 +264,8 @@ def evaluate_zero_shot(
                               "sims": None, "frame_scores": None,
                               "embedding": None}
 
-            accumulate_frames(accum[vid], counts[vid], indices, fs)
-            accumulate_frames(label_acc[vid], label_cnt[vid], indices, lbl)
+            _accumulate_clip(accum[vid], counts[vid], batch, b, start, fs)
+            _accumulate_clip(label_acc[vid], label_cnt[vid], batch, b, start, lbl)
 
             clip_score = float(fs.max())
             clip_scores.append(clip_score)

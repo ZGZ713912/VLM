@@ -4,7 +4,10 @@
 用法::
 
     python scripts/zero_shot_test.py --config configs/experiment.yaml --prompts all
-    python scripts/zero_shot_test.py --prompts label --output results/zero_shot_label.json
+    python scripts/zero_shot_test.py --prompts label
+
+产物默认全部落在 ``results/zero_shot_{prompts}/`` 下（``summary.json`` +
+``zero_shot_metrics.json`` + ``zero_shot_explanations.json`` + ``zero_shot_plots/``）。
 
 支持的 ``--prompts``：label | scene | contrast | all
 """
@@ -48,18 +51,26 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Zero-shot VAD with frozen CLIP")
     parser.add_argument("--config", default="configs/experiment.yaml")
     parser.add_argument("--prompts", default="all", choices=list(_PROMPT_TYPES.keys()))
-    parser.add_argument("--output", default="results/zero_shot_test.json")
-    parser.add_argument("--out-dir", default=None, help="Directory for plots/explanations")
+    parser.add_argument("--out-dir", default=None,
+                        help="Output dir (default: results/zero_shot_{prompts})")
+    parser.add_argument("--output", default=None,
+                        help="Summary JSON path (default: <out-dir>/summary.json)")
     args = parser.parse_args()
 
     cfg = load_experiment_config(args.config)
     set_seed(int(cfg.seed))
     device = torch.device(str(cfg.device))
     prompt_types = _PROMPT_TYPES[args.prompts]
-    out_dir = Path(args.out_dir) if args.out_dir else Path(args.output).parent / f"zero_shot_{args.prompts}"
+
+    # 本次运行的所有产物都收敛到同一个 per-prompt 目录，避免互相覆盖
+    out_dir = (
+        Path(args.out_dir) if args.out_dir
+        else Path("results") / f"zero_shot_{args.prompts}"
+    )
+    output_path = Path(args.output) if args.output else out_dir / "summary.json"
 
     log.info("Zero-shot test | config=%s device=%s prompts=%s", args.config, device, args.prompts)
-    ensure_dirs({"result": Path(args.output).parent, "out": out_dir})
+    ensure_dirs({"out": out_dir, "summary": output_path.parent})
     save_config_snapshot(cfg, out_dir / "config.yaml")
     save_json(runtime_info(), out_dir / "environment.json")
 
@@ -91,7 +102,7 @@ def main() -> None:
     )
     elapsed = time.time() - start
 
-    ensure_dirs({"result": Path(args.output).parent})
+    ensure_dirs({"summary": output_path.parent})
     summary = {
         "config": args.config,
         "prompt_selection": args.prompts,
@@ -100,7 +111,7 @@ def main() -> None:
         "inference_time_sec": round(elapsed, 2),
         "out_dir": str(out_dir),
     }
-    with open(args.output, "w") as f:
+    with open(output_path, "w") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
     log.info("Zero-shot done in %.1fs | frame_auc=%s frame_ap=%s video_auc=%s video_ap=%s",
@@ -108,7 +119,7 @@ def main() -> None:
              results["metrics"].get("frame_ap", 0.0),
              results["metrics"].get("video_auc", 0.0),
              results["metrics"].get("video_ap", 0.0))
-    log.info("Summary saved to %s | plots/explanations in %s", args.output, out_dir)
+    log.info("Summary saved to %s | plots/explanations in %s", output_path, out_dir)
 
 
 if __name__ == "__main__":

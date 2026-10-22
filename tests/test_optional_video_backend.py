@@ -12,7 +12,7 @@ import pytest
 
 @pytest.mark.parametrize("module_name,class_name", [
     ("datasets.video_dataset", "VideoDataset"),
-    ("data.avenue_dataset", "AvenueDataset"),
+    ("data", "AvenueDataset"),
 ])
 def test_decode_without_decord(tmp_path, module_name, class_name):
     video = tmp_path / "sample.avi"

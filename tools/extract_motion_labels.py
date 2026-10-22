@@ -54,7 +54,8 @@ def extract(
     out_path.mkdir(parents=True, exist_ok=True)
 
     # 用 VideoDataset 的元数据能力（视频列表、帧数），不切 clip
-    ds = VideoDataset(root=root, split=split, clip_length=16, image_size=None)
+    video_dir = Path(root) / f"{split}_videos"
+    ds = VideoDataset(video_dir=video_dir, split=split, clip_length=16, image_size=None)
     for vr in ds.video_records:
         # 逐段读取所有帧并计算运动标签
         labels: list[np.ndarray] = []

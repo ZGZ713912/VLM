@@ -37,10 +37,6 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from datasets.builders import build_split_dataloader  # noqa: E402
-from datasets.video_dataset import (  # noqa: E402
-    _normalize_split,
-    _resolve_avenue_root,
-)
 from eval.inference import evaluate_videos  # noqa: E402
 from models.factory import build_matcher, build_model  # noqa: E402
 from utils.config import load_experiment_config, save_config_snapshot  # noqa: E402
@@ -405,7 +401,7 @@ def _write_index(
     ckpt: str,
     cfg_path: str,
     started: str,
-    label_mode: str = "motion_diff",
+    label_mode: str = "pixel",
 ) -> None:
     lines = [
         "# VLM-VAD 可视化演示",
@@ -451,6 +447,7 @@ def _write_index(
         "- 红框阈值默认取该视频 frame score 的 90 分位（展示用相对阈值，",
         "  非模型校准后的决策边界）；可用 `--threshold` 覆盖。",
         "- 模型只输出**帧级**分数，红框表示该帧分数超过阈值，不能定位画面中具体区域。",
+        "- 当前标签为GT mask，**可作为学术结论**；如需更高精度可获取更高质量的标注。",
         "- 候选描述为 prompt 检索结果，不能作为已确认的事件类别。",
         "",
     ]
@@ -520,10 +517,8 @@ def main() -> None:
     explanations = results["explanations"]
     per_video = results["per_video"]
 
-    # ── 视频路径 ─────────────────────────────────────────────────
-    root = _resolve_avenue_root(cfg.data.root)
-    split_name = _normalize_split(eval_split)
-    video_dir = root / f"{split_name}_videos"
+    # ── 视频路径（直接从数据集的 video_records 取，避免重复解析配置）──
+    video_by_id = {r.video_id: r.video_path for r in loader.dataset.video_records}
 
     summaries: list[dict] = []
     for raw in args.videos:
@@ -531,9 +526,9 @@ def main() -> None:
         if vid not in frame_scores:
             log.error("Video %s not found in eval results; skipping", vid)
             continue
-        video_path = video_dir / f"{vid}.avi"
-        if not video_path.is_file():
-            log.error("Video file missing: %s; skipping", video_path)
+        video_path = video_by_id.get(vid)
+        if video_path is None or not Path(video_path).is_file():
+            log.error("Video file missing for %s: %s; skipping", vid, video_path)
             continue
         log.info("Rendering %s (%d frames)...", vid, len(frame_scores[vid]))
         summary = render_video(

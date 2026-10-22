@@ -11,8 +11,32 @@ from .cache import validate_feature_cache
 from .video_dataset import _read_video_metadata, _resolve_avenue_root
 
 
+def _resolve_dataset_root(data_cfg) -> Path:
+    """按 Design A 的显式 split 段反推数据集根目录，缺省回退 data_cfg.root。
+
+    configs/experiment.yaml 用 data.train.video_path 声明视频目录，没有顶层
+    的 data.root；而 normality 协议需要遍历 training_videos，所以从 video_path
+    的父目录得到根目录。兼容旧的 data.root 写法（测试里用 SimpleNamespace(root=...)）。
+    """
+    getter = getattr(data_cfg, "get", None)
+    if callable(getter):
+        try:
+            from .builders import _resolve_split_paths
+
+            _, video_path, _ = _resolve_split_paths(data_cfg, "training")
+            return Path(video_path).expanduser().resolve().parent
+        except Exception:
+            pass
+    root = getattr(data_cfg, "root", None)
+    if root is None:
+        raise ValueError(
+            "Cannot resolve the Avenue dataset root: set data.train.video_path "
+            "(Design A) or data.root."
+        )
+    return _resolve_avenue_root(root)
+
 def load_normal_training_features(data_cfg, backbone_cfg, seed: int) -> tuple[dict, dict, dict]:
-    root = _resolve_avenue_root(data_cfg.root)
+    root = _resolve_dataset_root(data_cfg)
     directory = Path(data_cfg.feature_dir) / "training"
     validate_feature_cache(directory, backbone_cfg)
     videos = sorted((root / "training_videos").glob("*.avi"))

@@ -24,13 +24,24 @@ paths:
   run_name: "baseline_v2"
 
 # === Data (consumed by datasets/builders.py + datasets/dataloader.py) ===
+# Design A：每个 split 显式声明自己的路径，datasets 按 split 取用。
+#   train → 训练视频（CUHK Avenue training 全为正常，无异常标注）
+#   test  → 测试视频 + ground_truth 异常标注
 data:
-  root: "data"                 # resolves to data/Avenue_Dataset automatically
   dataset: "avenue"
 
+  # split 选择器（被 train.py / eval.py / scripts 读取）
   train_split: "training"
   eval_split: "testing"
   validation_fraction: 0.25   # hold out training videos; never select on test
+
+  # 显式 per-split 路径（datasets/builders.py 按 split 取用）
+  train:
+    video_path: "data/Avenue_Dataset/training_videos"
+    mask_path: null                 # 训练视频全正常 → 帧标签全 0
+  test:
+    video_path: "data/Avenue_Dataset/testing_videos"
+    mask_path: "data/Avenue_Dataset/ground_truth/testing_label_mask"
 
   # clip slicing
   clip_length: 16
@@ -42,16 +53,14 @@ data:
   image_size: null            # backbone owns resize, crop and normalization
   video_backend: "auto"        # "auto" | "decord" | "opencv"
 
-  # labels — masks are downsampled grayscale frames, so pseudo labels are used
-  frame_label_mode: "motion_diff"   # "pixel" | "motion_diff"
-  motion_threshold: 3.0
-
   # dataloader
   batch_size: 4
   num_workers: 4
 
   # feature cache (fast path, ~10x)
   feature_dir: "data/features_v2"
+  # 逐帧标签来源：pixel（GT mask，默认）| motion_diff（运动伪标签）| official（官方 mat 标注）
+  frame_label_mode: "pixel"
   label_dir: "data/labels_v2"
   use_feature: "auto"          # auto | true (required) | false (pixel path)
   allow_missing: false
@@ -113,4 +122,4 @@ eval:
   batch_size: 4
   top_k_prompts: 5
   save_plots: true
-  text_pool: "mean"     # zero-shot text pooling: "mean" (aligns with training) | "eos"
+  text_pool: "eos"     # zero-shot text pooling: "mean" (aligns with training) | "eos"

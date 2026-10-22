@@ -4,11 +4,14 @@
 
 用法::
 
-    python eval.py --config configs/experiment.yaml \\
-                   --ckpt ./checkpoints/exp01/best.pt
+    python eval.py --config configs/experiment.yaml --ckpt ./checkpoints/exp01/best.pt
+
+    # 不带 --ckpt：下游模块为随机初始化，trained 指标无意义，
+    # 但零样本 CLIP 保底（zs_* 指标）仍然有效——训练前的 baseline 参照
+    python eval.py --config configs/experiment.yaml
 
 输出（到 {result_dir}/{run_name}/）：
-    - metrics.json      帧级/clip级/视频级 AUC & AP
+    - metrics.json      帧级/clip级/视频级 AUC & AP + zs_* 零样本保底指标
     - explanations.json 每个视频的异常原因（template-based 解释）
     - plots/*.png       时序热力图 + prompt 相似度条形图
 """
@@ -39,7 +42,9 @@ log = get_logger(__name__)
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate VLM-VAD checkpoint")
     parser.add_argument("--config", default="configs/experiment.yaml")
-    parser.add_argument("--ckpt", required=True, help="Path to checkpoint .pt")
+    parser.add_argument("--ckpt", default=None,
+                        help="Checkpoint .pt 路径；省略则下游模块为随机初始化，"
+                             "只看 zs_* 零样本保底指标")
     parser.add_argument("--eval-split", default=None,
                         help="Override eval split (default: cfg.data.eval_split)")
     args = parser.parse_args()
@@ -53,24 +58,33 @@ def main() -> None:
     )
 
     eval_split = args.eval_split if args.eval_split else str(cfg.data.eval_split)
-    eval_loader, src = build_split_dataloader(
+    eval_loader, source = build_split_dataloader(
         cfg.data, split=eval_split, shuffle=False, seed=int(cfg.seed),
         backbone_cfg=cfg.model.backbone,
     )
     log.info("Eval data ready | %s(%d batches) via %s",
-             eval_split, len(eval_loader), src)
+             eval_split, len(eval_loader), source)
 
     # 构建模型 + 加载权重
     model = build_model(cfg)
     matcher = build_matcher(cfg.model)
-    state = load_checkpoint(args.ckpt)
-    from utils.provenance import validate_checkpoint
-    validate_checkpoint(state, cfg, model.prompt_processor.process())
-    model.load_state_dict(state["model_state"])
-    if "matcher_state" in state:
-        matcher.load_state_dict(state["matcher_state"])
-    log.info("Checkpoint loaded (epoch=%s, best_val=%s)",
-             state.get("epoch", "?"), state.get("best_val_metric", "?"))
+    if args.ckpt is not None:
+        state = load_checkpoint(args.ckpt)
+        from utils.provenance import validate_checkpoint
+        validate_checkpoint(state, cfg, model.prompt_processor.process())
+        model.load_state_dict(state["model_state"])
+        if "matcher_state" in state:
+            matcher.load_state_dict(state["matcher_state"])
+        log.info("Checkpoint loaded (epoch=%s, best_val=%s)",
+                 state.get("epoch", "?"), state.get("best_val_metric", "?"))
+    else:
+        # 未提供 --ckpt：下游模块随机初始化，trained 指标无意义；
+        # 但 zs_* 零样本 CLIP 保底指标仍然有效（polarity 由 evaluate_videos 内部按 cfg 计算）
+        log.warning(
+            "未提供 --ckpt：下游模块为随机初始化，trained 指标无意义；"
+            "本次运行请关注 zs_* 零样本 CLIP 保底指标（训练前的 baseline）。"
+        )
+        state = {"config": {}}
 
     results = evaluate_videos(
         model=model,

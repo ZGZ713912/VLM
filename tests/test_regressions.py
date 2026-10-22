@@ -75,13 +75,13 @@ def avenue(tmp_path):
 
 def feature_data(avenue, **kwargs):
     root, features, labels = avenue
-    return FeatureDataset(features, root, clip_length=4, clip_step=4,
+    return FeatureDataset(features, root / "training_videos", clip_length=4, clip_step=4,
                           label_dir=labels, frame_label_mode="motion_diff", **kwargs)
 
 
 def test_pixel_mode_never_uses_pseudo_labels(avenue):
     root, features, labels = avenue
-    ds = FeatureDataset(features, root, clip_length=4, label_dir=labels, frame_label_mode="pixel")
+    ds = FeatureDataset(features, root / "training_videos", clip_length=4, label_dir=labels, frame_label_mode="pixel")
     assert ds[0]["frame_label"].sum() == 0
     assert feature_data(avenue)[0]["frame_label"].sum() == 2
 
@@ -99,7 +99,11 @@ def test_label_count_and_values_checked(avenue):
 
 def test_reject_grayscale_as_pixel_masks(tmp_path):
     path = tmp_path / "gray.mat"
-    savemat(path, {"vol": (np.arange(1024) % 200 + 1).reshape(8, 8, 16)})
+    frames = (np.arange(16 * 64) % 200 + 1).reshape(16, 8, 8).astype(np.uint8)
+    cells = np.empty((1, 16), dtype=object)
+    for i in range(16):
+        cells[0, i] = frames[i]
+    savemat(path, {"volLabel": cells})
     with pytest.raises(ValueError, match="grayscale"):
         _load_mask_volume(str(path))
 
@@ -133,7 +137,7 @@ def test_demo_timeline_has_curve_in_visible_bottom_panel():
 
 def test_motion_labels_independent_of_clip_boundaries(avenue):
     root, _, _ = avenue
-    ds = VideoDataset(root, clip_length=4, clip_step=3, frame_label_mode="motion_diff",
+    ds = VideoDataset(root / "training_videos", clip_length=4, clip_step=3, frame_label_mode="motion_diff",
                       image_size=None, motion_threshold=3.0, video_backend="opencv")
     a, b = ds[0], ds[1]
     assert a["frame_indices"][-1] == b["frame_indices"][0]
@@ -242,6 +246,20 @@ def test_evaluation_uses_aligned_space_and_global_frame_ranking(config, model_fa
     assert (tmp_path / "frame_scores.npz").is_file()
     for entry in result["explanations"].values():
         assert all(i >= entry["start_frame"] for i in entry["top_abnormal_frames"])
+
+
+def test_zero_shot_baseline_does_not_change_trained_frame_scores(config, model_factory, avenue):
+    model = model_factory(config)
+    matcher = build_matcher(config.model)
+    dataset = feature_data(avenue)
+    with_baseline = evaluate_videos(model, matcher, dataset, torch.device("cpu"),
+                                    cfg=config, save_plots=False)
+    without_baseline = evaluate_videos(model, matcher, dataset, torch.device("cpu"),
+                                       cfg=None, save_plots=False)
+    assert "zs_frame_auc" in with_baseline["metrics"]
+    assert "zs_frame_auc" not in without_baseline["metrics"]
+    for video_id, scores in with_baseline["frame_score"].items():
+        np.testing.assert_allclose(scores, without_baseline["frame_score"][video_id])
 
 
 def test_config_snapshot_is_independent_and_overrides_are_respected(config, tmp_path):

@@ -26,12 +26,19 @@ paths:
 
 # === Data (consumed by datasets/builders.py + datasets/dataloader.py) ===
 data:
-  root: "data"                 # resolves to data/Avenue_Dataset automatically
   dataset: "avenue"
 
   train_split: "training"
   eval_split: "testing"
   validation_fraction: 0.25   # hold out training videos; never select on test
+
+  # Explicit paths match the upstream dataset API. Official labels use label_dir.
+  train:
+    video_path: "data/Avenue_Dataset/training_videos"
+    mask_path: null
+  test:
+    video_path: "data/Avenue_Dataset/testing_videos"
+    mask_path: null
 
   # clip slicing
   clip_length: 16

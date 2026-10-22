@@ -24,7 +24,7 @@ def main() -> int:
     import torch
 
     modules = ("torchvision", "cv2", "av", "open_clip", "omegaconf",
-               "datasets.video_dataset", "data.avenue_dataset")
+               "datasets.video_dataset", "data")
     for name in modules:
         importlib.import_module(name)
 
