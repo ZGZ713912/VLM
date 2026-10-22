@@ -86,6 +86,7 @@ def main() -> None:
         )
         state = {"config": {}}
 
+    # prompt 极性在 evaluate_videos 内部由 cfg 计算（含长度校验），无需在此重复
     results = evaluate_videos(
         model=model,
         matcher=matcher,
