@@ -141,6 +141,11 @@ VS Code 不再另外修改镜像的用户 ID。
 对应的 `scripts/dev.sh ... build`，再重建开发容器。这也避免了不同 Compose/Bake
 版本对 Dev Containers 临时构建文件的权限处理差异。
 
+普通 zsh 在未安装 Oh My Zsh 时也会显示当前目录，例如 `/workspace/vlm_ws %`。
+Compose 从绑定仓库的 `scripts/docker` 读取终端模板，更新模板无需重新构建镜像；
+容器启动时同步受项目管理的配置，并保留自定义配置。已打开的终端执行
+`source ~/.zshrc` 可重新加载同步后的提示符。
+
 ## 可选个人开发工具
 
 默认环境不安装 Node/Codex/opencode，也不挂载个人配置或凭据。

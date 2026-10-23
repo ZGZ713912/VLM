@@ -13,6 +13,7 @@ services:
       HOME: /tmp/devhome
       SHELL: /usr/bin/zsh
       WORKSPACE_DIR: /workspace/vlm_ws
+      VLM_WS_SHARE_DIR: /workspace/vlm_ws/scripts/docker
       PYTHONPATH: /workspace/vlm_ws
       MPLCONFIGDIR: /tmp/devhome/.config/matplotlib
       PIP_CACHE_DIR: /tmp/devhome/.cache/pip
