@@ -24,7 +24,12 @@ AMD/Intel 显卡目前按 CPU 使用；CUDA 镜像的 GPU 兼容性取决于固�
 
 `:cpu` 是包含 amd64/arm64 的 manifest；`:cpu-amd64`、`:cpu-arm64` 是发布流水线的架构标签。
 `:dev` 暂时保留为旧 CUDA 镜像别名，新配置不再使用这个含糊的标签。
-首次引入本配置时，需要先完成镜像发布，或者先执行下面的本地 `build`。
+预构建镜像已发布在 [Docker Hub](https://hub.docker.com/r/zgzdocker/vlm-ws)，可按需直接拉取：
+
+```bash
+docker pull zgzdocker/vlm-ws:cpu
+docker pull zgzdocker/vlm-ws:cuda12.1
+```
 
 ## 首次启动
 
@@ -66,7 +71,7 @@ Web UI 直接使用所选的 CPU/CUDA 开发镜像，在同一服务上增加 We
 ./scripts/dev.sh cpu web down
 ```
 
-新镜像标签尚未发布时先运行对应的 `build`。端口由 `WEB_PORT` 控制，
+首次启动自动拉取镜像。端口由 `WEB_PORT` 控制，
 数据与命令行共用；详见 [Web Studio](webapp.md)。
 
 ## 构建、测试和停止
@@ -83,8 +88,7 @@ Web UI 直接使用所选的 CPU/CUDA 开发镜像，在同一服务上增加 We
 ./scripts/dev.sh gpu test
 ```
 
-`up` 使用已有/拉取的镜像；新标签尚未发布时，先使用对应的 `build` 在本地构建。
-网络故障仍可能阻止拉取基础镜像或下载依赖。
+`up` 使用已有/拉取的镜像，日常使用无需构建。修改 Dockerfile 或依赖时，使用对应的 `build`。
 `docker-compose.build.yml` 已移除，本地构建由启动脚本调用同一个 Dockerfile，按所选
 后端传入基础镜像和 PyTorch 安装源；镜像标签通过 Compose 解析，与 `up` 完全一致。
 需要更新远端镜像时，先执行 `./scripts/dev.sh cpu pull` 或 `gpu pull`，再执行对应的 `up -d`。
@@ -145,6 +149,9 @@ VLM_HOST_TOOLS=1 ./scripts/dev.sh cpu shell
 这些工具独立于研究依赖；默认发布镜像不包含滚动更新的 CLI 安装。
 
 ## 发布与复现
+
+自动发布需要在仓库 Actions Secrets 中配置 `DOCKERHUB_USERNAME=zgzdocker` 和具有
+Read & Write 权限的 `DOCKERHUB_TOKEN`；本机手动发布使用 `docker login` 的认证。
 
 `.github/workflows/docker-publish.yml` 在原生 amd64、arm64 runner 分别构建并运行
 环境检查和项目测试；CUDA 镜像在 amd64 runner 上验证依赖及 CPU 路径。

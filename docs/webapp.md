@@ -5,15 +5,15 @@ Web UI 与训练代码已整合到同一仓库，使用同一套 CPU/CUDA 镜像
 
 ## 启动
 
-在仓库根目录，选择 CPU 或 NVIDIA 后端。新镜像标签尚未发布时先本地构建：
+在仓库根目录，选择 CPU 或 NVIDIA 后端，拉取预构建镜像后启动：
 
 ```bash
-./scripts/dev.sh cpu build
+./scripts/dev.sh cpu pull
 ./scripts/dev.sh cpu web up -d
 # 浏览器打开 http://127.0.0.1:8000
 
 # NVIDIA 用户改用 gpu；需要宿主驱动和 NVIDIA Container Toolkit
-./scripts/dev.sh gpu build
+./scripts/dev.sh gpu pull
 ./scripts/dev.sh gpu web up -d
 ```
 

@@ -64,7 +64,8 @@ python scripts/run_experiments.py --output results/stage2_verified_sweep
 git clone <repo-url>
 cd vlm_ws
 
-# 2. CPU 开发：自动创建 .env 并匹配宿主 UID/GID
+# 2. CPU 开发：拉取预构建镜像，自动创建 .env 并匹配宿主 UID/GID
+./scripts/dev.sh cpu pull
 ./scripts/dev.sh cpu up -d
 ./scripts/dev.sh cpu check
 
@@ -77,7 +78,9 @@ Intel/AMD 共用 amd64 镜像，ARM64 使用同一 `:cpu` 标签中的 arm64 镜
 使用单独的 `:cuda12.1` 镜像，并先安装驱动和 NVIDIA Container Toolkit。
 VS Code 的 `Reopen in Container` 可选择 CPU 或 NVIDIA CUDA 配置。
 
-镜像由 GitHub Actions 构建、测试和发布。新标签尚未发布或修改依赖后，可本地构建：
+预构建镜像发布在 [Docker Hub](https://hub.docker.com/r/zgzdocker/vlm-ws)，首次使用无需本地构建。
+更新已有镜像时，先运行 `./scripts/dev.sh cpu pull` 或 `gpu pull`，再执行对应的 `up -d`。
+修改 `Dockerfile` 或依赖后，可本地构建：
 
 ```bash
 ./scripts/dev.sh cpu build       # NVIDIA 使用 gpu build
@@ -141,7 +144,7 @@ CPU 与 CUDA 镜像共用研究依赖，分别安装 CPU-only / CUDA PyTorch。
 [容器文档](docs/container.md)。
 
 Web UI 使用 `./scripts/dev.sh cpu web up -d`，NVIDIA 主机改用 `gpu`，
-浏览器打开 `http://127.0.0.1:8000`。新标签尚未发布时先运行对应的 `build`。
+浏览器打开 `http://127.0.0.1:8000`。首次启动会自动拉取所选后端的镜像。
 页面功能和迁移方式见 [Web Studio](docs/webapp.md)，后续同步上游见 [分支说明](docs/branches.md)。
 
 ### 阶段 1 · 数据与标注
