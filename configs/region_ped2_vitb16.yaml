@@ -1,0 +1,6 @@
+base: configs/region_ped2.yaml
+data:
+  feature_root: data/features_region_v1/ped2/vitb16
+backbone:
+  name: ViT-B-16
+  pretrained: laion2b_s34b_b88k

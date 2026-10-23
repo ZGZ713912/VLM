@@ -1,0 +1,21 @@
+# Declared before any region model official test scores were inspected.
+# Shared split_seed=42 ensures comparable normal holdout videos across train seeds.
+campaign: region_v1_20261023
+primary:
+  avenue: region_v1_avenue_scene_concat_s42
+  ped2: region_v1_ped2_scene_concat_s42
+runs:
+  - {config: configs/region_temporal.yaml, run: region_v1_avenue_scene_concat_s42, seed: 42, prompt: scene, fusion: concat}
+  - {config: configs/region_temporal.yaml, run: region_v1_avenue_scene_concat_s43, seed: 43, prompt: scene, fusion: concat}
+  - {config: configs/region_temporal.yaml, run: region_v1_avenue_scene_crossattn_s42, seed: 42, prompt: scene, fusion: crossattn}
+  - {config: configs/region_temporal.yaml, run: region_v1_avenue_scene_crossattn_s43, seed: 43, prompt: scene, fusion: crossattn}
+  - {config: configs/region_temporal.yaml, run: region_v1_avenue_label_concat_s42, seed: 42, prompt: label, fusion: concat}
+  - {config: configs/region_temporal.yaml, run: region_v1_avenue_contrast_concat_s42, seed: 42, prompt: contrast, fusion: concat}
+  - {config: configs/region_ped2.yaml, run: region_v1_ped2_scene_concat_s42, seed: 42, prompt: scene, fusion: concat}
+  - {config: configs/region_ped2.yaml, run: region_v1_ped2_scene_concat_s43, seed: 43, prompt: scene, fusion: concat}
+  - {config: configs/region_ped2.yaml, run: region_v1_ped2_scene_crossattn_s42, seed: 42, prompt: scene, fusion: crossattn}
+  - {config: configs/region_ped2.yaml, run: region_v1_ped2_scene_crossattn_s43, seed: 43, prompt: scene, fusion: crossattn}
+  - {config: configs/region_ped2.yaml, run: region_v1_ped2_label_concat_s42, seed: 42, prompt: label, fusion: concat}
+  - {config: configs/region_ped2.yaml, run: region_v1_ped2_contrast_concat_s42, seed: 42, prompt: contrast, fusion: concat}
+  - {config: configs/region_ped2_vitb16.yaml, run: region_v1_ped2_b16_scene_concat_s42, seed: 42, prompt: scene, fusion: concat}
+  - {config: configs/region_ped2_vitb16.yaml, run: region_v1_ped2_b16_scene_crossattn_s42, seed: 42, prompt: scene, fusion: crossattn}

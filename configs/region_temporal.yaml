@@ -1,0 +1,48 @@
+# Fixed before first region-model official test evaluation. No test tuning.
+seed: 42
+device: cuda
+dataset: avenue
+data:
+  root: data/Avenue_Dataset
+  feature_root: data/features_region_v1/avenue/vitb32
+  label_root: data/labels_official
+  split_seed: 42
+  validation_fraction: 0.25
+backbone:
+  provider: open_clip_patch
+  name: ViT-B-32
+  pretrained: laion2b_s34b_b79k
+model:
+  hidden_dim: 128
+  fusion: concat
+  num_heads: 4
+  top_regions: 3
+memory:
+  bank_frames: 512
+  k: 3
+train:
+  epochs: 12
+  batch_size: 8
+  clip_length: 16
+  clip_step: 16
+  lr: 0.0003
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  loss: {appearance: 1.0, motion: 0.25, bce: 0.2, contrastive: 0.05}
+prompt:
+  config: configs/region_prompts.yaml
+  type: scene
+eval:
+  smooth_window: 5
+  calibration_quantile: 0.99
+  bootstrap_samples: 500
+  # Weights and ablations fixed a priori; every one is reported.
+  variants:
+    appearance: {appearance: 1.0}
+    motion: {motion: 1.0}
+    prediction: {prediction: 1.0}
+    semantic: {semantic: 1.0}
+    classifier: {classifier: 1.0}
+    spatial_motion: {appearance: 0.5, motion: 0.5}
+    full: {appearance: 0.35, motion: 0.35, prediction: 0.15, semantic: 0.15}
+  primary_variant: full

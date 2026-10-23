@@ -1,0 +1,7 @@
+# Same fixed method and hyperparameters as Avenue; different data/scene text.
+base: configs/region_temporal.yaml
+dataset: ped2
+data:
+  root: data/UCSDped2
+  feature_root: data/features_region_v1/ped2/vitb32
+  label_root: data/labels_ped2_official

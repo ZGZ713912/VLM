@@ -1,0 +1,22 @@
+# Scene vocabulary chosen from dataset descriptions, before test scoring.
+# Explicit polarity avoids substring errors (e.g. 'normal' in 'abnormal').
+avenue:
+  label:
+    normal: [a person walking, a person standing, a person carrying a bag]
+    abnormal: [a person running, a person jumping, a person throwing a bag, a person falling]
+  scene:
+    normal: [a surveillance view of people walking on a campus walkway, a pedestrian standing on a paved walkway, an empty campus walkway]
+    abnormal: [a surveillance view of a person running on a campus walkway, a person jumping and waving their arms on a walkway, a person throwing an object across a campus walkway, a person lying on the ground on a walkway]
+  contrast:
+    normal: [ordinary walking rather than running, people carrying objects while walking, pedestrians moving calmly on a walkway]
+    abnormal: [running rather than ordinary walking, throwing objects rather than carrying them, jumping rather than walking, falling rather than standing]
+ped2:
+  label:
+    normal: [a pedestrian walking, a person standing, a group of pedestrians]
+    abnormal: [a person riding a bicycle, a person skateboarding, a vehicle, a person pushing a cart]
+  scene:
+    normal: [a surveillance view of pedestrians walking on a footpath, people walking along a pedestrian walkway, an empty pedestrian path]
+    abnormal: [a cyclist riding a bicycle along a pedestrian walkway, a skateboarder on a pedestrian path, a vehicle driving on a pedestrian path, a person pushing a wheeled cart on a pedestrian path]
+  contrast:
+    normal: [walking on foot rather than riding a bicycle, a footpath used by pedestrians, ordinary people walking along a path]
+    abnormal: [riding a bicycle rather than walking on foot, a skateboarder rather than a walking pedestrian, a vehicle among pedestrians, a wheeled cart among pedestrians]

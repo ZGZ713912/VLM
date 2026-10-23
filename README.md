@@ -4,6 +4,24 @@
 
 > **核心思想：** Vision-Language Model + Prompt Engineering → Video Anomaly Detection + Explainability
 
+2026-10-23 已新增正常视频上的区域/时序训练路径，并完成 14 组真实实验（每组 12 轮）：
+预先指定的完整模型在 Avenue / UCSD Ped2 官方帧级 AUC 为 **0.8215 / 0.8907**。
+包括全幅区域 CLIP 特征、局部光流正常库、因果时序预测、合成扰动辅助分类、
+场景文本对齐及无标注视频推理。数据由官方来源获取、转换和校验。
+完整结果、阈值误报/漏报、消融的负面结果及复现入口见
+[区域时序训练报告](docs/region_temporal_results.md)。语言融合尚未稳定超过单分量基线。
+
+```bash
+# 在 GPU 项目容器内；如已有带 manifest 的缓存则会校验并复用
+python tools/prepare_ped2.py
+python tools/extract_region_features.py --video-dir data/Avenue_Dataset/training_videos --out data/features_region_v1/avenue/vitb32/training
+python scripts/train_region_model.py --config configs/region_temporal.yaml --run-name my_region_run
+# 训练结束后独立评估；testing 的区域特征准备方式见报告
+python scripts/train_region_model.py --config configs/region_temporal.yaml --run-name my_region_run --evaluate-only
+# 任意视频的无标注推理：不读取测试标注、不重新拟合阈值
+python scripts/predict_region_video.py --checkpoint checkpoints/region_v1_avenue_scene_concat_s42/detector.pt --video path/to/video.avi --out-dir results/my_prediction
+```
+
 当前开发进度、已修复问题和未完成的研究任务见 [项目审计报告](docs/project_audit.md)。
 默认 v2 流程将 16 个训练视频按 seed 划分为 12 个训练、4 个验证视频；21 个测试视频
 只用于最终评估。旧 `exp01` 属于历史工程结果，不能作为独立测试集上的官方成绩。

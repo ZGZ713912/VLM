@@ -31,6 +31,8 @@ data/Avenue_Dataset/
 data/features*/
 data/labels*/
 data/ground_truth_demo.zip
+data/downloads/
+data/UCSDped2/
 
 # ── Runtime outputs (keep dirs via .gitkeep) ────────────────
 checkpoints/*
