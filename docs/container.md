@@ -122,11 +122,22 @@ CPU/GPU 共用同一个服务，切换后端会重建该服务容器。容器名
 
 CPU 与 CUDA 的 Dev Container 配置分别位于 `.devcontainer/cpu/devcontainer.json` 和
 `.devcontainer/cuda/devcontainer.json`，使用与 CLI 相同的 Compose 服务。
-初始化命令在宿主同步 UID/GID，VS Code 不再另外修改镜像的用户 ID。
+初始化命令在宿主同步 UID/GID，并执行 `scripts/dev.sh cpu|gpu ensure-image`：
+
+1. 本地已有对应架构的镜像时直接复用。
+2. 本地没有镜像时，先从 Docker Hub 拉取 CPU 或 CUDA 镜像。
+3. 拉取失败时，用同一个 Dockerfile 和所选后端的构建参数在本地构建，成功后继续打开容器。
+
+Dev Containers 使用 `.devcontainer/docker-compose.yml` 禁止启动时再次拉取，
+因此回退构建的镜像也能直接使用。初始化失败时停止打开，VS Code 日志保留拉取和构建错误。
+如果基础镜像或依赖也没有缓存，本地构建仍需要网络；固定到 `@sha256:...` 的镜像
+拉取失败时会直接报错，避免用本地构建替代指定摘要。
+VS Code 不再另外修改镜像的用户 ID。
 使用 `Dev Containers: Reopen in Container`；需要 CUDA 时选择 NVIDIA CUDA 配置。
 切换 CPU/CUDA 配置前，先在宿主执行当前模式的 `scripts/dev.sh ... down`，再重新选择
 配置打开，避免编辑器复用仍在运行的另一模式容器。
-运行配置只引用镜像，打开 VS Code 不会重复构建研究环境。修改依赖后，先在宿主运行
+之后重新打开会复用本地镜像；需要更新预构建镜像时，先运行 `scripts/dev.sh cpu|gpu pull`。
+修改依赖后，先在宿主运行
 对应的 `scripts/dev.sh ... build`，再重建开发容器。这也避免了不同 Compose/Bake
 版本对 Dev Containers 临时构建文件的权限处理差异。
 

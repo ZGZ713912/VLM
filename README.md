@@ -77,6 +77,7 @@ Intel/AMD 共用 amd64 镜像，ARM64 使用同一 `:cpu` 标签中的 arm64 镜
 不同 Linux 发行版共用同一套配置；NVIDIA x86-64 主机将命令中的 `cpu` 换成 `gpu`，
 使用单独的 `:cuda12.1` 镜像，并先安装驱动和 NVIDIA Container Toolkit。
 VS Code 的 `Reopen in Container` 可选择 CPU 或 NVIDIA CUDA 配置。
+首次打开会先复用本地镜像，没有时自动拉取；拉取失败则自动本地构建，成功后继续打开。
 
 预构建镜像发布在 [Docker Hub](https://hub.docker.com/r/zgzdocker/vlm-ws)，首次使用无需本地构建。
 更新已有镜像时，先运行 `./scripts/dev.sh cpu pull` 或 `gpu pull`，再执行对应的 `up -d`。

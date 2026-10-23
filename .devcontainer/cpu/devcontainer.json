@@ -1,8 +1,9 @@
 {
   "name": "vlm-ws (CPU)",
-  "initializeCommand": ["bash", "${localWorkspaceFolder}/scripts/dev.sh", "cpu", "prepare"],
+  "initializeCommand": ["bash", "${localWorkspaceFolder}/scripts/dev.sh", "cpu", "ensure-image"],
   "dockerComposeFile": [
-    "../../docker-compose.yml"
+    "../../docker-compose.yml",
+    "../docker-compose.yml"
   ],
   "service": "vlm-dev",
   "workspaceFolder": "/workspace/vlm_ws",

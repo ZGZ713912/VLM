@@ -52,3 +52,5 @@ jobs:
           docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.host-tools.yml config --quiet
           docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.web.yml config --quiet
           docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.web.yml config --quiet
+          docker compose --env-file /dev/null -f docker-compose.yml -f .devcontainer/docker-compose.yml config --quiet
+          docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.gpu.yml -f .devcontainer/docker-compose.yml config --quiet

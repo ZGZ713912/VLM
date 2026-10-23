@@ -7,6 +7,7 @@ usage() {
 Usage: ./scripts/dev.sh cpu|gpu COMMAND [ARGS...]
 
   prepare     Create .env if needed and synchronize host UID/GID (no container start)
+  ensure-image  Reuse a local image, otherwise pull it and build if pulling fails
   up -d       Start the development container
   web up -d   Start Web Studio with the selected CPU or CUDA image
   build       Build the selected CPU or CUDA image locally
@@ -58,7 +59,7 @@ fi
 
 if [[ "${mode}" == gpu ]]; then
   case "${action}" in
-    up|build|run|check|test|prepare)
+    up|build|run|check|test|prepare|ensure-image)
       case "$(uname -m)" in
         x86_64|amd64) ;;
         *) echo 'The pinned CUDA image requires x86-64; use cpu on ARM64 (Jetson needs a separate L4T image).' >&2; exit 2 ;;
@@ -109,25 +110,61 @@ compose_setting() {
   '
 }
 
+build_image() {
+  local base_image torch_index image shell_tools
+  base_image="$(compose_setting CPU_BASE_IMAGE)"
+  base_image="${base_image:-python:3.10-slim-bookworm}"
+  torch_index=https://download.pytorch.org/whl/cpu
+  if [[ "${mode}" == gpu ]]; then
+    base_image="$(compose_setting CUDA_BASE_IMAGE)"
+    base_image="${base_image:-pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime}"
+    torch_index=https://download.pytorch.org/whl/cu121
+  fi
+  image="$("${compose[@]}" config --images vlm-dev)"
+  if [[ "${image}" == *@* ]]; then
+    echo 'A digest-pinned image cannot be replaced by a local build. Use an image tag in VLM_CPU_IMAGE or VLM_CUDA_IMAGE to build locally.' >&2
+    return 2
+  fi
+  shell_tools="$(compose_setting INSTALL_OPTIONAL_SHELL_TOOLS)"
+  # Both explicit builds and first-use fallback use the same Dockerfile/arguments.
+  docker build --tag "${image}" \
+    --build-arg "BASE_IMAGE=${base_image}" \
+    --build-arg "TORCH_INDEX_URL=${torch_index}" \
+    --build-arg "INSTALL_OPTIONAL_SHELL_TOOLS=${shell_tools:-0}" \
+    "$@" "${project_dir}"
+}
+
+ensure_image() {
+  local image required_platform cached_platform
+  # Fail directly if the daemon is unavailable, before trying a pull/build.
+  required_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
+  if [[ "${mode}" == gpu ]]; then
+    required_platform=linux/amd64
+  else
+    required_platform="${DOCKER_DEFAULT_PLATFORM:-${required_platform}}"
+  fi
+  case "${required_platform}" in
+    linux/x86_64|linux/amd64) required_platform=linux/amd64 ;;
+    linux/aarch64|linux/arm64|linux/arm64/v8) required_platform=linux/arm64 ;;
+    *) echo "Unsupported image platform: ${required_platform}; use Linux amd64 or arm64 (CPU)." >&2; return 2 ;;
+  esac
+  image="$("${compose[@]}" config --images vlm-dev)"
+  cached_platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${image}" 2>/dev/null || true)"
+  if [[ "${cached_platform}" == "${required_platform}" ]]; then
+    echo "Using local image ${image} (${required_platform})."
+    return 0
+  fi
+  echo "Pulling ${image} (${required_platform})..."
+  if docker pull --platform "${required_platform}" "${image}"; then
+    return 0
+  fi
+  echo "Pull failed for ${image}; building the ${mode} image locally..." >&2
+  build_image --platform "${required_platform}"
+}
+
 case "${action}" in
-  build)
-    base_image="$(compose_setting CPU_BASE_IMAGE)"
-    base_image="${base_image:-python:3.10-slim-bookworm}"
-    torch_index=https://download.pytorch.org/whl/cpu
-    if [[ "${mode}" == gpu ]]; then
-      base_image="$(compose_setting CUDA_BASE_IMAGE)"
-      base_image="${base_image:-pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime}"
-      torch_index=https://download.pytorch.org/whl/cu121
-    fi
-    image="$("${compose[@]}" config --images)"
-    shell_tools="$(compose_setting INSTALL_OPTIONAL_SHELL_TOOLS)"
-    # Runtime/VS Code only use images; keep local builds in this explicit command.
-    docker build --tag "${image}" \
-      --build-arg "BASE_IMAGE=${base_image}" \
-      --build-arg "TORCH_INDEX_URL=${torch_index}" \
-      --build-arg "INSTALL_OPTIONAL_SHELL_TOOLS=${shell_tools:-0}" \
-      "$@" "${project_dir}"
-    ;;
+  build) build_image "$@" ;;
+  ensure-image) ensure_image ;;
   shell) "${compose[@]}" exec vlm-dev zsh "$@" ;;
   check) "${compose[@]}" run --rm --no-deps vlm-dev python scripts/docker/check_environment.py --expect "${expect}" "$@" ;;
   test) "${compose[@]}" run --rm --no-deps vlm-dev python -m pytest -q "$@" ;;
